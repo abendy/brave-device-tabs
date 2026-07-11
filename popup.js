@@ -1,0 +1,420 @@
+"use strict";
+
+const state = {
+  devices: [],
+  selected: new Set(),
+  filter: "",
+  loading: false,
+};
+
+const elements = {
+  deviceList: document.querySelector("#device-list"),
+  deviceTemplate: document.querySelector("#device-template"),
+  tabTemplate: document.querySelector("#tab-template"),
+  refreshButton: document.querySelector("#refresh-button"),
+  searchInput: document.querySelector("#search-input"),
+  selectVisibleButton: document.querySelector("#select-visible-button"),
+  openButton: document.querySelector("#open-button"),
+  selectionCount: document.querySelector("#selection-count"),
+  summary: document.querySelector("#summary"),
+  status: document.querySelector("#status"),
+};
+
+document.addEventListener("DOMContentLoaded", initialize);
+
+function initialize() {
+  elements.refreshButton.addEventListener("click", loadDevices);
+  elements.searchInput.addEventListener("input", handleFilterInput);
+  elements.selectVisibleButton.addEventListener("click", toggleVisibleSelection);
+  elements.openButton.addEventListener("click", openSelectedTabs);
+  loadDevices();
+}
+
+async function loadDevices() {
+  if (state.loading) return;
+
+  setLoading(true);
+  hideStatus();
+
+  try {
+    if (!chrome.sessions?.getDevices) {
+      throw new Error("This browser does not expose the synced-sessions API.");
+    }
+
+    const rawDevices = await getSyncedDevices();
+    state.devices = normalizeDevices(rawDevices);
+    removeStaleSelections();
+  } catch (error) {
+    console.error("Unable to load synced device tabs:", error);
+    state.devices = [];
+    showStatus(
+      "Could not read synced tabs. Confirm Brave Sync is enabled and “Open Tabs” is selected on both devices.",
+      true
+    );
+  } finally {
+    setLoading(false);
+    render();
+  }
+}
+
+// Brave versions differ in whether sessions.getDevices() returns a Promise.
+// Supplying a callback works in both callback-only and Promise-capable builds.
+function getSyncedDevices() {
+  return new Promise((resolve, reject) => {
+    chrome.sessions.getDevices({}, (devices) => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        reject(new Error(error.message));
+        return;
+      }
+
+      resolve(devices ?? []);
+    });
+  });
+}
+
+function normalizeDevices(rawDevices) {
+  return (rawDevices ?? [])
+    .map((device, deviceIndex) => {
+      const tabs = (device.sessions ?? [])
+        .flatMap((session) => {
+          if (session.window?.tabs) return session.window.tabs;
+          if (session.tab) return [session.tab];
+          return [];
+        })
+        .map((tab, tabIndex) => normalizeTab(tab, device.deviceName, deviceIndex, tabIndex))
+        .filter((tab) => tab.url && isOpenableUrl(tab.url));
+
+      return {
+        id: `device-${deviceIndex}-${slug(device.deviceName || "unknown")}`,
+        name: device.deviceName || `Device ${deviceIndex + 1}`,
+        tabs: deduplicateTabs(tabs),
+      };
+    })
+    .filter((device) => device.tabs.length > 0);
+}
+
+function normalizeTab(tab, deviceName, deviceIndex, tabIndex) {
+  const url = tab.url || "";
+  const title = tab.title?.trim() || readableUrl(url) || "Untitled tab";
+  const stablePart = tab.sessionId || `${url}-${tabIndex}`;
+
+  return {
+    id: `${deviceIndex}:${hashString(`${deviceName}|${stablePart}`)}`,
+    title,
+    url,
+    searchable: `${deviceName} ${title} ${url}`.toLocaleLowerCase(),
+  };
+}
+
+function deduplicateTabs(tabs) {
+  const seen = new Set();
+
+  return tabs.filter((tab) => {
+    if (seen.has(tab.url)) return false;
+    seen.add(tab.url);
+    return true;
+  });
+}
+
+function isOpenableUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return ["http:", "https:", "file:", "ftp:"].includes(parsed.protocol);
+  } catch {
+    return false;
+  }
+}
+
+function readableUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname === "/" ? "" : parsed.pathname;
+    return `${parsed.hostname}${path}`;
+  } catch {
+    return url;
+  }
+}
+
+function render() {
+  elements.deviceList.replaceChildren();
+
+  const totalTabs = state.devices.reduce((sum, device) => sum + device.tabs.length, 0);
+  elements.summary.textContent = state.loading
+    ? "Loading synced tabs…"
+    : `${state.devices.length} ${pluralize(state.devices.length, "device")} · ${totalTabs} ${pluralize(totalTabs, "tab")}`;
+
+  if (!state.loading && state.devices.length === 0) {
+    renderEmptyState();
+    updateControls();
+    return;
+  }
+
+  for (const device of state.devices) {
+    renderDevice(device);
+  }
+
+  applyFilter();
+  updateControls();
+}
+
+function renderDevice(device) {
+  const fragment = elements.deviceTemplate.content.cloneNode(true);
+  const section = fragment.querySelector(".device");
+  const deviceCheckbox = fragment.querySelector(".device-checkbox");
+  const deviceName = fragment.querySelector(".device-name");
+  const deviceCount = fragment.querySelector(".device-count");
+  const tabsContainer = fragment.querySelector(".tabs");
+
+  section.dataset.deviceId = device.id;
+  deviceName.textContent = device.name;
+  deviceName.title = device.name;
+  deviceCount.textContent = `${device.tabs.length} ${pluralize(device.tabs.length, "tab")}`;
+  deviceCheckbox.dataset.deviceId = device.id;
+  deviceCheckbox.addEventListener("change", () => toggleDevice(device.id, deviceCheckbox.checked));
+
+  for (const tab of device.tabs) {
+    const tabFragment = elements.tabTemplate.content.cloneNode(true);
+    const row = tabFragment.querySelector(".tab-row");
+    const checkbox = tabFragment.querySelector(".tab-checkbox");
+    const title = tabFragment.querySelector(".tab-title");
+    const url = tabFragment.querySelector(".tab-url");
+
+    row.dataset.tabId = tab.id;
+    row.dataset.searchable = tab.searchable;
+    checkbox.dataset.tabId = tab.id;
+    checkbox.checked = state.selected.has(tab.id);
+    checkbox.addEventListener("change", () => toggleTab(tab.id, checkbox.checked));
+    title.textContent = tab.title;
+    title.title = tab.title;
+    url.textContent = tab.url;
+    url.title = tab.url;
+
+    tabsContainer.append(tabFragment);
+  }
+
+  elements.deviceList.append(fragment);
+  updateDeviceCheckbox(device.id);
+}
+
+function renderEmptyState() {
+  const empty = document.createElement("div");
+  empty.className = "empty";
+
+  const title = document.createElement("p");
+  title.className = "empty-title";
+  title.textContent = "No synced device tabs found";
+
+  const copy = document.createElement("p");
+  copy.className = "empty-copy";
+  copy.textContent =
+    "In Brave Sync, enable Open Tabs on your iPhone and Mac, open a few pages on the iPhone, then refresh.";
+
+  empty.append(title, copy);
+  elements.deviceList.append(empty);
+}
+
+function handleFilterInput(event) {
+  state.filter = event.target.value.trim().toLocaleLowerCase();
+  applyFilter();
+  updateControls();
+}
+
+function applyFilter() {
+  for (const section of elements.deviceList.querySelectorAll(".device")) {
+    const rows = [...section.querySelectorAll(".tab-row")];
+    let visibleCount = 0;
+
+    for (const row of rows) {
+      const visible = !state.filter || row.dataset.searchable.includes(state.filter);
+      row.hidden = !visible;
+      if (visible) visibleCount += 1;
+    }
+
+    section.hidden = visibleCount === 0;
+    const count = section.querySelector(".device-count");
+    if (count) {
+      const device = findDevice(section.dataset.deviceId);
+      count.textContent = state.filter
+        ? `${visibleCount} of ${device?.tabs.length ?? 0}`
+        : `${device?.tabs.length ?? 0} ${pluralize(device?.tabs.length ?? 0, "tab")}`;
+    }
+  }
+}
+
+function toggleTab(tabId, checked) {
+  checked ? state.selected.add(tabId) : state.selected.delete(tabId);
+  updateAllDeviceCheckboxes();
+  updateControls();
+}
+
+function toggleDevice(deviceId, checked) {
+  const device = findDevice(deviceId);
+  if (!device) return;
+
+  const visibleIds = getVisibleTabIds(deviceId);
+  const ids = state.filter ? visibleIds : device.tabs.map((tab) => tab.id);
+
+  for (const id of ids) {
+    checked ? state.selected.add(id) : state.selected.delete(id);
+  }
+
+  syncRenderedTabCheckboxes();
+  updateDeviceCheckbox(deviceId);
+  updateControls();
+}
+
+function toggleVisibleSelection() {
+  const visibleIds = getAllVisibleTabIds();
+  if (visibleIds.length === 0) return;
+
+  const allVisibleSelected = visibleIds.every((id) => state.selected.has(id));
+
+  for (const id of visibleIds) {
+    allVisibleSelected ? state.selected.delete(id) : state.selected.add(id);
+  }
+
+  syncRenderedTabCheckboxes();
+  updateAllDeviceCheckboxes();
+  updateControls();
+}
+
+function getVisibleTabIds(deviceId) {
+  const section = elements.deviceList.querySelector(`[data-device-id="${cssEscape(deviceId)}"]`);
+  if (!section) return [];
+
+  return [...section.querySelectorAll(".tab-row:not([hidden])")].map((row) => row.dataset.tabId);
+}
+
+function getAllVisibleTabIds() {
+  return [...elements.deviceList.querySelectorAll(".device:not([hidden]) .tab-row:not([hidden])")]
+    .map((row) => row.dataset.tabId);
+}
+
+function updateAllDeviceCheckboxes() {
+  for (const device of state.devices) {
+    updateDeviceCheckbox(device.id);
+  }
+}
+
+function updateDeviceCheckbox(deviceId) {
+  const device = findDevice(deviceId);
+  const section = elements.deviceList.querySelector(`[data-device-id="${cssEscape(deviceId)}"]`);
+  const checkbox = section?.querySelector(".device-checkbox");
+
+  if (!device || !checkbox) return;
+
+  const relevantIds = state.filter
+    ? getVisibleTabIds(deviceId)
+    : device.tabs.map((tab) => tab.id);
+  const selectedCount = relevantIds.filter((id) => state.selected.has(id)).length;
+
+  checkbox.checked = relevantIds.length > 0 && selectedCount === relevantIds.length;
+  checkbox.indeterminate = selectedCount > 0 && selectedCount < relevantIds.length;
+}
+
+function syncRenderedTabCheckboxes() {
+  for (const checkbox of elements.deviceList.querySelectorAll(".tab-checkbox")) {
+    checkbox.checked = state.selected.has(checkbox.dataset.tabId);
+  }
+}
+
+function updateControls() {
+  const count = state.selected.size;
+  elements.selectionCount.textContent = `${count} selected`;
+  elements.openButton.disabled = count === 0 || state.loading;
+  elements.openButton.textContent = count > 0 ? `Open selected (${count})` : "Open selected";
+
+  const visibleIds = getAllVisibleTabIds();
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => state.selected.has(id));
+  elements.selectVisibleButton.textContent = allVisibleSelected ? "Clear visible" : "Select visible";
+  elements.selectVisibleButton.disabled = visibleIds.length === 0;
+}
+
+async function openSelectedTabs() {
+  const selectedTabs = state.devices
+    .flatMap((device) => device.tabs)
+    .filter((tab) => state.selected.has(tab.id));
+
+  if (selectedTabs.length === 0) return;
+
+  elements.openButton.disabled = true;
+  elements.openButton.textContent = "Opening…";
+  hideStatus();
+
+  try {
+    // Open in the currently focused laptop window. Keep all but the first
+    // backgrounded so a large transfer does not visibly cycle through tabs.
+    for (let index = 0; index < selectedTabs.length; index += 1) {
+      await chrome.tabs.create({
+        url: selectedTabs[index].url,
+        active: index === 0,
+      });
+    }
+
+    window.close();
+  } catch (error) {
+    console.error("Unable to open selected tabs:", error);
+    showStatus("Some tabs could not be opened. Try a smaller selection.", true);
+    updateControls();
+  }
+}
+
+function removeStaleSelections() {
+  const validIds = new Set(
+    state.devices.flatMap((device) => device.tabs.map((tab) => tab.id))
+  );
+
+  for (const id of state.selected) {
+    if (!validIds.has(id)) state.selected.delete(id);
+  }
+}
+
+function findDevice(deviceId) {
+  return state.devices.find((device) => device.id === deviceId);
+}
+
+function setLoading(loading) {
+  state.loading = loading;
+  elements.refreshButton.disabled = loading;
+  elements.refreshButton.classList.toggle("is-spinning", loading);
+  elements.searchInput.disabled = loading;
+  updateControls();
+}
+
+function showStatus(message, isError = false) {
+  elements.status.textContent = message;
+  elements.status.classList.toggle("error", isError);
+  elements.status.hidden = false;
+}
+
+function hideStatus() {
+  elements.status.hidden = true;
+  elements.status.textContent = "";
+  elements.status.classList.remove("error");
+}
+
+function pluralize(count, singular) {
+  return count === 1 ? singular : `${singular}s`;
+}
+
+function slug(value) {
+  return value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function hashString(value) {
+  let hash = 2166136261;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0).toString(36);
+}
+
+function cssEscape(value) {
+  if (globalThis.CSS?.escape) return CSS.escape(value);
+  return value.replace(/["\\]/g, "\\$&");
+}

@@ -1,0 +1,395 @@
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --surface: #f6f7f9;
+  --surface-hover: #eef0f3;
+  --border: #d9dde3;
+  --text: #17191d;
+  --muted: #686f7a;
+  --accent: #4c63d2;
+  --accent-hover: #3e53bf;
+  --accent-text: #ffffff;
+  --danger: #b42318;
+  --shadow: 0 -5px 16px rgb(0 0 0 / 8%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #202124;
+    --surface: #292b2f;
+    --surface-hover: #32353a;
+    --border: #41454c;
+    --text: #f2f3f5;
+    --muted: #aeb3bc;
+    --accent: #8395f2;
+    --accent-hover: #93a3f7;
+    --accent-text: #101217;
+    --danger: #ff9b92;
+    --shadow: 0 -5px 16px rgb(0 0 0 / 25%);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-width: 520px;
+  width: 520px;
+  max-height: 650px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 260px;
+  max-height: 650px;
+}
+
+.app-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 18px 12px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+.summary {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.icon-button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  background: var(--surface-hover);
+}
+
+.icon-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.icon-button svg,
+.search svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-button.is-spinning svg {
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 0 18px 12px;
+}
+
+.search {
+  position: relative;
+  flex: 1;
+}
+
+.search svg {
+  position: absolute;
+  top: 50%;
+  left: 11px;
+  color: var(--muted);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.search input {
+  width: 100%;
+  height: 36px;
+  padding: 0 11px 0 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.search input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.text-button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.text-button:hover {
+  text-decoration: underline;
+}
+
+.status {
+  margin: 0 18px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.status.error {
+  color: var(--danger);
+}
+
+.device-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+
+.device + .device {
+  border-top: 8px solid var(--surface);
+}
+
+.device-header {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.device-select,
+.tab-row {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.device-select {
+  min-width: 0;
+  gap: 10px;
+  font-weight: 650;
+}
+
+.device-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-count {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.device-select input,
+.tab-row input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.custom-checkbox {
+  position: relative;
+  flex: 0 0 17px;
+  width: 17px;
+  height: 17px;
+  border: 1.5px solid var(--muted);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+input:checked + .custom-checkbox,
+input:indeterminate + .custom-checkbox {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+input:checked + .custom-checkbox::after {
+  position: absolute;
+  top: 1px;
+  left: 4px;
+  width: 5px;
+  height: 9px;
+  border: solid var(--accent-text);
+  border-width: 0 2px 2px 0;
+  content: "";
+  transform: rotate(45deg);
+}
+
+input:indeterminate + .custom-checkbox::after {
+  position: absolute;
+  top: 7px;
+  left: 3px;
+  width: 9px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent-text);
+  content: "";
+}
+
+input:focus-visible + .custom-checkbox {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.tab-row {
+  gap: 11px;
+  min-height: 54px;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab-row:last-child {
+  border-bottom: 0;
+}
+
+.tab-row:hover {
+  background: var(--surface-hover);
+}
+
+.tab-row[hidden] {
+  display: none;
+}
+
+.tab-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.tab-title,
+.tab-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-title {
+  font-size: 13.5px;
+  font-weight: 550;
+}
+
+.tab-url {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.empty {
+  padding: 42px 30px 50px;
+  text-align: center;
+}
+
+.empty-title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.empty-copy {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.footer {
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 62px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  box-shadow: var(--shadow);
+}
+
+.selection-count {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.primary-button {
+  min-width: 132px;
+  height: 38px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}

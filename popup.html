@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Device Tabs Picker</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="app" aria-labelledby="app-title">
+    <header class="app-header">
+      <div>
+        <h1 id="app-title">Device tabs</h1>
+        <p id="summary" class="summary" aria-live="polite">Loading synced tabs…</p>
+      </div>
+      <button id="refresh-button" class="icon-button" type="button" title="Refresh" aria-label="Refresh synced tabs">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20 11a8.1 8.1 0 0 0-14.9-4L3 9m0 0V4m0 5h5M4 13a8.1 8.1 0 0 0 14.9 4L21 15m0 0v5m0-5h-5"/>
+        </svg>
+      </button>
+    </header>
+
+    <section class="toolbar" aria-label="Tab controls">
+      <label class="search">
+        <span class="visually-hidden">Filter tabs</span>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="11" cy="11" r="7"></circle>
+          <path d="m20 20-4-4"></path>
+        </svg>
+        <input id="search-input" type="search" autocomplete="off" placeholder="Filter by title, URL, or device">
+      </label>
+      <button id="select-visible-button" class="text-button" type="button">Select visible</button>
+    </section>
+
+    <div id="status" class="status" hidden role="status"></div>
+    <div id="device-list" class="device-list" aria-live="polite"></div>
+
+    <footer class="footer">
+      <span id="selection-count" class="selection-count">0 selected</span>
+      <button id="open-button" class="primary-button" type="button" disabled>Open selected</button>
+    </footer>
+  </main>
+
+  <template id="device-template">
+    <section class="device">
+      <div class="device-header">
+        <label class="device-select">
+          <input class="device-checkbox" type="checkbox">
+          <span class="custom-checkbox" aria-hidden="true"></span>
+          <span class="device-name"></span>
+        </label>
+        <span class="device-count"></span>
+      </div>
+      <div class="tabs"></div>
+    </section>
+  </template>
+
+  <template id="tab-template">
+    <label class="tab-row">
+      <input class="tab-checkbox" type="checkbox">
+      <span class="custom-checkbox" aria-hidden="true"></span>
+      <span class="tab-copy">
+        <span class="tab-title"></span>
+        <span class="tab-url"></span>
+      </span>
+    </label>
+  </template>
+
+  <script src="popup.js"></script>
+</body>
+</html>
