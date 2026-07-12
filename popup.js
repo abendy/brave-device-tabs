@@ -363,14 +363,23 @@ async function openTabs(tabs, triggerButton) {
   try {
     const windowId = await getCurrentWindowId();
 
-    // Open in the currently focused laptop window. Keep all but the first
-    // backgrounded so a large transfer does not visibly cycle through tabs.
+    // Open every tab backgrounded first. Activating a tab mid-loop would
+    // shift focus away from this popup, and Chrome/Brave close extension
+    // popups the instant they lose focus - killing the loop early and
+    // leaving later tabs unopened. Activate the first tab only once
+    // everything has been created.
+    let firstTabId;
     for (let index = 0; index < tabs.length; index += 1) {
-      await chrome.tabs.create({
+      const created = await chrome.tabs.create({
         windowId,
         url: tabs[index].url,
-        active: index === 0,
+        active: false,
       });
+      if (index === 0) firstTabId = created.id;
+    }
+
+    if (firstTabId !== undefined) {
+      await chrome.tabs.update(firstTabId, { active: true });
     }
 
     window.close();
