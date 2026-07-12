@@ -363,22 +363,41 @@ input:focus-visible + .custom-checkbox {
   font-size: 12.5px;
 }
 
+.footer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.secondary-button,
 .primary-button {
-  min-width: 132px;
   height: 38px;
   padding: 0 16px;
-  border: 0;
   border-radius: 8px;
-  background: var(--accent);
-  color: var(--accent-text);
   cursor: pointer;
   font-weight: 650;
+}
+
+.secondary-button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.secondary-button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.primary-button {
+  min-width: 132px;
+  border: 0;
+  background: var(--accent);
+  color: var(--accent-text);
 }
 
 .primary-button:hover:not(:disabled) {
   background: var(--accent-hover);
 }
 
+.secondary-button:disabled,
 .primary-button:disabled {
   cursor: not-allowed;
   opacity: 0.5;

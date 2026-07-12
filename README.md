@@ -11,6 +11,7 @@ A local Manifest V3 extension that lists synced tabs from each foreign Brave dev
 - Select or clear all currently visible results
 - Refresh synced sessions
 - Opens selected URLs in the current Brave window
+- Opens all synced tabs at once without requiring a selection
 - Deduplicates identical URLs within each device
 - Requests `sessions` to list synced devices and `tabs` to read tab titles and URLs
 - No analytics, network calls, background process, or remote code

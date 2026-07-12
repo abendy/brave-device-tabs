@@ -14,6 +14,7 @@ const elements = {
   refreshButton: document.querySelector("#refresh-button"),
   searchInput: document.querySelector("#search-input"),
   selectVisibleButton: document.querySelector("#select-visible-button"),
+  openAllButton: document.querySelector("#open-all-button"),
   openButton: document.querySelector("#open-button"),
   selectionCount: document.querySelector("#selection-count"),
   summary: document.querySelector("#summary"),
@@ -26,6 +27,7 @@ function initialize() {
   elements.refreshButton.addEventListener("click", loadDevices);
   elements.searchInput.addEventListener("input", handleFilterInput);
   elements.selectVisibleButton.addEventListener("click", toggleVisibleSelection);
+  elements.openAllButton.addEventListener("click", openAllTabs);
   elements.openButton.addEventListener("click", openSelectedTabs);
   loadDevices();
 }
@@ -321,7 +323,10 @@ function syncRenderedTabCheckboxes() {
 
 function updateControls() {
   const count = state.selected.size;
+  const totalTabs = getAllTabs().length;
   elements.selectionCount.textContent = `${count} selected`;
+  elements.openAllButton.disabled = totalTabs === 0 || state.loading;
+  elements.openAllButton.textContent = totalTabs > 0 ? `Open all (${totalTabs})` : "Open all";
   elements.openButton.disabled = count === 0 || state.loading;
   elements.openButton.textContent = count > 0 ? `Open selected (${count})` : "Open selected";
 
@@ -333,22 +338,37 @@ function updateControls() {
 }
 
 async function openSelectedTabs() {
-  const selectedTabs = state.devices
-    .flatMap((device) => device.tabs)
+  const selectedTabs = getAllTabs()
     .filter((tab) => state.selected.has(tab.id));
 
-  if (selectedTabs.length === 0) return;
+  await openTabs(selectedTabs, elements.openButton);
+}
 
+async function openAllTabs() {
+  await openTabs(getAllTabs(), elements.openAllButton);
+}
+
+function getAllTabs() {
+  return state.devices.flatMap((device) => device.tabs);
+}
+
+async function openTabs(tabs, triggerButton) {
+  if (tabs.length === 0) return;
+
+  elements.openAllButton.disabled = true;
   elements.openButton.disabled = true;
-  elements.openButton.textContent = "Opening…";
+  triggerButton.textContent = "Opening…";
   hideStatus();
 
   try {
+    const windowId = await getCurrentWindowId();
+
     // Open in the currently focused laptop window. Keep all but the first
     // backgrounded so a large transfer does not visibly cycle through tabs.
-    for (let index = 0; index < selectedTabs.length; index += 1) {
+    for (let index = 0; index < tabs.length; index += 1) {
       await chrome.tabs.create({
-        url: selectedTabs[index].url,
+        windowId,
+        url: tabs[index].url,
         active: index === 0,
       });
     }
@@ -359,6 +379,25 @@ async function openSelectedTabs() {
     showStatus("Some tabs could not be opened. Try a smaller selection.", true);
     updateControls();
   }
+}
+
+function getCurrentWindowId() {
+  return new Promise((resolve, reject) => {
+    chrome.windows.getCurrent({}, (currentWindow) => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        reject(new Error(error.message));
+        return;
+      }
+
+      if (currentWindow?.id === undefined) {
+        reject(new Error("Unable to identify the current browser window."));
+        return;
+      }
+
+      resolve(currentWindow.id);
+    });
+  });
 }
 
 function removeStaleSelections() {
