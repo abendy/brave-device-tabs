@@ -84,6 +84,7 @@ function normalizeDevices(rawDevices) {
           if (session.tab) return [session.tab];
           return [];
         })
+        .reverse()
         .map((tab, tabIndex) => normalizeTab(tab, device.deviceName, deviceIndex, tabIndex))
         .filter((tab) => tab.url && isOpenableUrl(tab.url));
 
