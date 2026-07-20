@@ -308,6 +308,99 @@ h1 em {
   height: 32px;
 }
 
+/* ---------- view switcher: Tabs / Opened ---------- */
+
+.view-switcher {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px 0;
+}
+
+.view-tab {
+  padding: 6px 14px;
+  border: 1px solid rgba(90, 120, 150, 0.4);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #fdfeff, #e2ebf3);
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-family: "Trebuchet MS", Tahoma, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.view-tab.is-active {
+  border-color: rgba(10, 40, 70, 0.5);
+  background: linear-gradient(180deg, var(--aqua-top), var(--aqua-deep));
+  color: #fff;
+  text-shadow: 0 -1px 1px rgba(0, 40, 80, 0.5);
+}
+
+#tabs-view,
+#opened-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#tabs-view[hidden],
+#opened-view[hidden] {
+  display: none;
+}
+
+/* ---------- opened history ---------- */
+
+.opened-list {
+  gap: 10px;
+}
+
+.opened-batch-header {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-family: "Trebuchet MS", Tahoma, sans-serif;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.opened-batch-items {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(90, 120, 150, 0.4);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(233, 241, 248, 0.55));
+}
+
+.opened-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(160, 180, 200, 0.25);
+}
+
+.opened-row:last-child {
+  border-bottom: 0;
+}
+
+.opened-title {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opened-meta {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---------- toolbar: inset capsule search ---------- */
 
 .toolbar {
@@ -593,6 +686,39 @@ input:focus-visible + .custom-checkbox {
 .tab-url {
   color: var(--muted);
   font-size: 9.5px;
+}
+
+.tab-delete-button {
+  display: grid;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--danger);
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.tab-delete-button:hover {
+  background: rgba(255, 122, 102, 0.15);
+  opacity: 1;
+}
+
+.tab-delete-button svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tab-delete-button[hidden] {
+  display: none;
 }
 
 /* ---------- empty state ---------- */

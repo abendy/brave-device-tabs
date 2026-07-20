@@ -27,6 +27,11 @@ fly deploy
 `min_machines_running = 1` in `fly.toml` keeps one instance always on, so both
 the iOS share sheet and the browser popup get fast responses — no cold start.
 
+PocketBase applies any new files in `server/pb_migrations/` automatically on
+startup, so picking up schema changes (like the delete-permission migration
+that enables the popup's discard button) is just `fly deploy` again from
+`server/` — no separate migration step.
+
 ## 2. Create your PocketBase accounts
 
 Two accounts: a **superuser** (admin access, used only for setup) and one

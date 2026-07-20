@@ -1,10 +1,15 @@
 "use strict";
 
+const OPENED_HISTORY_KEY = "openedHistory";
+const MAX_OPENED_BATCHES = 50;
+
 const state = {
   devices: [],
   selected: new Set(),
   filter: "",
   loading: false,
+  activeTab: "tabs",
+  openedHistory: [],
 };
 
 const elements = {
@@ -20,6 +25,12 @@ const elements = {
   selectionCount: document.querySelector("#selection-count"),
   summary: document.querySelector("#summary"),
   status: document.querySelector("#status"),
+  tabsView: document.querySelector("#tabs-view"),
+  openedView: document.querySelector("#opened-view"),
+  openedList: document.querySelector("#opened-list"),
+  footer: document.querySelector("#footer"),
+  tabsViewButton: document.querySelector("#tabs-view-button"),
+  openedViewButton: document.querySelector("#opened-view-button"),
 };
 
 document.addEventListener("DOMContentLoaded", initialize);
@@ -31,6 +42,8 @@ function initialize() {
   elements.selectVisibleButton.addEventListener("click", toggleVisibleSelection);
   elements.openAllButton.addEventListener("click", openAllTabs);
   elements.openButton.addEventListener("click", openSelectedTabs);
+  elements.tabsViewButton.addEventListener("click", () => setActiveView("tabs"));
+  elements.openedViewButton.addEventListener("click", () => setActiveView("opened"));
   refreshAll();
 }
 
@@ -43,15 +56,29 @@ async function refreshAll() {
   // Each loader swallows its own errors and resolves to a safe fallback, so
   // one failing (e.g. no Shared Links server configured) never blocks the
   // other from rendering.
-  const [syncedDevices, sharedDevice] = await Promise.all([
+  const [syncedDevices, sharedDevice, openedHistory] = await Promise.all([
     loadSyncedDevices(),
     loadSharedLinksDevice(),
+    loadOpenedHistory(),
   ]);
 
-  state.devices = sharedDevice ? [sharedDevice, ...syncedDevices] : syncedDevices;
+  state.openedHistory = openedHistory;
+  const openedIds = getOpenedIdSet(openedHistory);
+  const filteredSynced = filterOpenedTabs(syncedDevices, openedIds);
+  const filteredShared = sharedDevice ? filterOpenedTabs([sharedDevice], openedIds) : [];
+
+  state.devices = [...filteredShared, ...filteredSynced];
   removeStaleSelections();
   setLoading(false);
   render();
+
+  if (state.activeTab === "opened") renderOpenedView();
+}
+
+function filterOpenedTabs(devices, openedIds) {
+  return devices
+    .map((device) => ({ ...device, tabs: device.tabs.filter((tab) => !openedIds.has(tab.id)) }))
+    .filter((device) => device.tabs.length > 0);
 }
 
 async function loadSyncedDevices() {
@@ -108,12 +135,14 @@ async function loadSharedLinksDevice() {
 
 function normalizeSharedLink(record) {
   const title = record.title?.trim() || readableUrl(record.url) || "Untitled link";
+  const source = record.source || "Shared Links";
 
   return {
     id: `shared:${record.id}`,
     title,
     url: record.url,
-    searchable: `shared links ${record.source ?? ""} ${title} ${record.url}`.toLocaleLowerCase(),
+    source,
+    searchable: `shared links ${source} ${title} ${record.url}`.toLocaleLowerCase(),
   };
 }
 
@@ -143,7 +172,7 @@ function normalizeDevices(rawDevices) {
           return [];
         })
         .reverse()
-        .map((tab, tabIndex) => normalizeTab(tab, device.deviceName, deviceIndex, tabIndex))
+        .map((tab, tabIndex) => normalizeTab(tab, device.deviceName, tabIndex))
         .filter((tab) => tab.url && isOpenableUrl(tab.url));
 
       return {
@@ -155,15 +184,19 @@ function normalizeDevices(rawDevices) {
     .filter((device) => device.tabs.length > 0);
 }
 
-function normalizeTab(tab, deviceName, deviceIndex, tabIndex) {
+function normalizeTab(tab, deviceName, tabIndex) {
   const url = tab.url || "";
   const title = tab.title?.trim() || readableUrl(url) || "Untitled tab";
   const stablePart = tab.sessionId || `${url}-${tabIndex}`;
 
   return {
-    id: `${deviceIndex}:${hashString(`${deviceName}|${stablePart}`)}`,
+    // No deviceIndex in the id - it's just an array position and can shift
+    // between refreshes if Brave reorders foreign devices, which would break
+    // the opened-history "have I seen this id before" lookup across reloads.
+    id: `sync:${hashString(`${deviceName}|${stablePart}`)}`,
     title,
     url,
+    source: deviceName,
     searchable: `${deviceName} ${title} ${url}`.toLocaleLowerCase(),
   };
 }
@@ -240,6 +273,7 @@ function renderDevice(device) {
     const checkbox = tabFragment.querySelector(".tab-checkbox");
     const title = tabFragment.querySelector(".tab-title");
     const url = tabFragment.querySelector(".tab-url");
+    const deleteButton = tabFragment.querySelector(".tab-delete-button");
 
     row.dataset.tabId = tab.id;
     row.dataset.searchable = tab.searchable;
@@ -250,6 +284,15 @@ function renderDevice(device) {
     title.title = tab.title;
     url.textContent = tab.url;
     url.title = tab.url;
+
+    if (device.id === "shared-links") {
+      deleteButton.hidden = false;
+      deleteButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        deleteSharedLink(tab.id);
+      });
+    }
 
     tabsContainer.append(tabFragment);
   }
@@ -273,6 +316,92 @@ function renderEmptyState() {
 
   empty.append(title, copy);
   elements.deviceList.append(empty);
+}
+
+function setActiveView(view) {
+  state.activeTab = view;
+  elements.tabsView.hidden = view !== "tabs";
+  elements.openedView.hidden = view !== "opened";
+  elements.footer.hidden = view !== "tabs";
+  elements.tabsViewButton.classList.toggle("is-active", view === "tabs");
+  elements.tabsViewButton.setAttribute("aria-selected", String(view === "tabs"));
+  elements.openedViewButton.classList.toggle("is-active", view === "opened");
+  elements.openedViewButton.setAttribute("aria-selected", String(view === "opened"));
+
+  if (view === "opened") renderOpenedView();
+}
+
+function renderOpenedView() {
+  elements.openedList.replaceChildren();
+
+  if (state.openedHistory.length === 0) {
+    renderOpenedEmptyState();
+    return;
+  }
+
+  for (const batch of state.openedHistory) {
+    elements.openedList.append(buildOpenedBatch(batch));
+  }
+}
+
+function buildOpenedBatch(batch) {
+  const section = document.createElement("section");
+  section.className = "opened-batch";
+
+  const header = document.createElement("div");
+  header.className = "opened-batch-header";
+  header.textContent = formatBatchTime(batch.openedAt);
+
+  const items = document.createElement("div");
+  items.className = "opened-batch-items";
+
+  for (const item of batch.items) {
+    const row = document.createElement("div");
+    row.className = "opened-row";
+
+    const title = document.createElement("span");
+    title.className = "opened-title";
+    title.textContent = item.title;
+    title.title = item.title;
+
+    const meta = document.createElement("span");
+    meta.className = "opened-meta";
+    meta.textContent = `${item.source} · ${item.url}`;
+    meta.title = item.url;
+
+    row.append(title, meta);
+    items.append(row);
+  }
+
+  section.append(header, items);
+  return section;
+}
+
+function formatBatchTime(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "Unknown time";
+
+  const timePart = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  if (date.toDateString() === new Date().toDateString()) return `Today at ${timePart}`;
+
+  const datePart = date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return `${datePart} at ${timePart}`;
+}
+
+function renderOpenedEmptyState() {
+  const empty = document.createElement("div");
+  empty.className = "empty";
+
+  const title = document.createElement("p");
+  title.className = "empty-title";
+  title.textContent = "Nothing opened yet";
+
+  const copy = document.createElement("p");
+  copy.className = "empty-copy";
+  copy.textContent = "Tabs you open from here show up as history, grouped by when you opened them.";
+
+  empty.append(title, copy);
+  elements.openedList.append(empty);
 }
 
 function handleFilterInput(event) {
@@ -437,19 +566,100 @@ async function openTabs(tabs, triggerButton) {
       if (index === 0) firstTabId = created.id;
     }
 
+    // Bookkeeping happens before activating the new tab, not after. Activating
+    // it (below) shifts focus away from this popup, and Chrome/Brave may tear
+    // the popup down as soon as that happens - racing against whatever's
+    // still in flight. Doing this first guarantees it completes while the
+    // popup is still definitely alive.
+    await markSharedLinksOpened(tabs);
+    await recordOpenedBatch(tabs);
+
     if (firstTabId !== undefined) {
       await chrome.tabs.update(firstTabId, { active: true });
     }
 
-    // Awaited (not fire-and-forget) so the requests have a chance to land
-    // before window.close() tears down this document and cancels them.
-    await markSharedLinksOpened(tabs);
     window.close();
   } catch (error) {
     console.error("Unable to open selected tabs:", error);
     showStatus("Some tabs could not be opened. Try a smaller selection.", true);
     updateControls();
   }
+}
+
+async function deleteSharedLink(tabId) {
+  const recordId = tabId.slice("shared:".length);
+
+  const { [STORAGE_KEYS.serverUrl]: serverUrl, [STORAGE_KEYS.token]: token } = await chrome.storage.local.get([
+    STORAGE_KEYS.serverUrl,
+    STORAGE_KEYS.token,
+  ]);
+  if (!serverUrl || !token) return;
+
+  try {
+    const response = await fetch(`${serverUrl}/api/collections/shared_links/records/${recordId}`, {
+      method: "DELETE",
+      headers: { Authorization: token },
+    });
+
+    // A 404 means it's already gone (e.g. deleted from another tab) - treat
+    // that as success rather than surfacing an error for a state the user
+    // already has.
+    if (!response.ok && response.status !== 404) {
+      throw new Error(`Delete failed (${response.status}).`);
+    }
+  } catch (error) {
+    console.error("Unable to delete shared link:", error);
+    showStatus("Could not discard that link. Try again.", true);
+    return;
+  }
+
+  // Outside the try/catch: the delete already succeeded server-side by this
+  // point, so a rendering error here must never be reported as a failed
+  // deletion.
+  removeTabFromState(tabId);
+  render();
+}
+
+function removeTabFromState(tabId) {
+  state.selected.delete(tabId);
+
+  for (const device of state.devices) {
+    const index = device.tabs.findIndex((tab) => tab.id === tabId);
+    if (index !== -1) {
+      device.tabs.splice(index, 1);
+      break;
+    }
+  }
+
+  state.devices = state.devices.filter((device) => device.tabs.length > 0);
+}
+
+async function loadOpenedHistory() {
+  const { [OPENED_HISTORY_KEY]: history } = await chrome.storage.local.get(OPENED_HISTORY_KEY);
+  return history ?? [];
+}
+
+async function recordOpenedBatch(tabs) {
+  const history = await loadOpenedHistory();
+  const batch = {
+    id: `${Date.now()}`,
+    openedAt: new Date().toISOString(),
+    items: tabs.map((tab) => ({ id: tab.id, title: tab.title, url: tab.url, source: tab.source })),
+  };
+
+  const updated = [batch, ...history].slice(0, MAX_OPENED_BATCHES);
+  await chrome.storage.local.set({ [OPENED_HISTORY_KEY]: updated });
+  return updated;
+}
+
+function getOpenedIdSet(history) {
+  const ids = new Set();
+
+  for (const batch of history) {
+    for (const item of batch.items) ids.add(item.id);
+  }
+
+  return ids;
 }
 
 async function markSharedLinksOpened(tabs) {

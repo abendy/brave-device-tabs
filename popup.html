@@ -26,24 +26,35 @@
       </button>
     </header>
 
-    <p id="summary" class="summary" aria-live="polite">Loading synced tabs…</p>
+    <div class="view-switcher" role="tablist" aria-label="View">
+      <button id="tabs-view-button" class="view-tab is-active" type="button" role="tab" aria-selected="true">Tabs</button>
+      <button id="opened-view-button" class="view-tab" type="button" role="tab" aria-selected="false">Opened</button>
+    </div>
 
-    <section class="toolbar" aria-label="Tab controls">
-      <label class="search">
-        <span class="visually-hidden">Filter tabs</span>
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="11" cy="11" r="7"></circle>
-          <path d="m20 20-4-4"></path>
-        </svg>
-        <input id="search-input" type="search" autocomplete="off" placeholder="Filter by title, URL, or device">
-      </label>
-      <button id="select-visible-button" class="text-button" type="button">Select visible</button>
-    </section>
+    <div id="tabs-view">
+      <p id="summary" class="summary" aria-live="polite">Loading synced tabs…</p>
 
-    <div id="status" class="status" hidden role="status"></div>
-    <div id="device-list" class="device-list" aria-live="polite"></div>
+      <section class="toolbar" aria-label="Tab controls">
+        <label class="search">
+          <span class="visually-hidden">Filter tabs</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"></circle>
+            <path d="m20 20-4-4"></path>
+          </svg>
+          <input id="search-input" type="search" autocomplete="off" placeholder="Filter by title, URL, or device">
+        </label>
+        <button id="select-visible-button" class="text-button" type="button">Select visible</button>
+      </section>
 
-    <footer class="footer">
+      <div id="status" class="status" hidden role="status"></div>
+      <div id="device-list" class="device-list" aria-live="polite"></div>
+    </div>
+
+    <div id="opened-view" hidden>
+      <div id="opened-list" class="device-list opened-list" aria-live="polite"></div>
+    </div>
+
+    <footer id="footer" class="footer">
       <span id="selection-count" class="selection-count">0 selected</span>
       <div class="footer-actions">
         <button id="open-all-button" class="secondary-button" type="button" disabled>Open all</button>
@@ -74,6 +85,11 @@
         <span class="tab-title"></span>
         <span class="tab-url"></span>
       </span>
+      <button class="tab-delete-button" type="button" title="Discard" aria-label="Discard shared link" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 7h16M9 7V4h6v3m-7 0 1 13h6l1-13"/>
+        </svg>
+      </button>
     </label>
   </template>
 
