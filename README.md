@@ -2,6 +2,9 @@
 
 A local Manifest V3 extension that lists synced tabs from each foreign Brave device, lets you select individual tabs, and opens the selection in the currently focused desktop window.
 
+It optionally also shows links shared from an iPhone via a companion Share
+Extension — see [Shared Links](#shared-links-optional) below.
+
 ## Features
 
 - Lists tabs grouped by synced device
@@ -14,7 +17,9 @@ A local Manifest V3 extension that lists synced tabs from each foreign Brave dev
 - Opens all synced tabs at once without requiring a selection
 - Deduplicates identical URLs within each device
 - Requests `sessions` to list synced devices and `tabs` to read tab titles and URLs
-- No analytics, network calls, background process, or remote code
+- No analytics, background process, or remote code. The synced-tabs feature
+  makes no network calls; the optional Shared Links feature below does — see
+  that section for exactly what and why.
 
 ## Install in Brave
 
@@ -39,6 +44,19 @@ After changing Sync settings, open or reload a page on the iPhone and allow a mo
 
 The first selected URL becomes active. Remaining URLs open as background tabs in the currently focused Brave window.
 
+## Shared Links (optional)
+
+Brave Sync has no public API for third-party apps to write into it, so links
+shared from an iPhone can't join the sync chain this extension reads. Instead,
+an iOS Share Extension (`ios/`) posts shared URLs to a small self-hosted
+[PocketBase](https://pocketbase.io) instance (`server/`), and this extension
+polls that same instance and merges unopened links in as a "Shared Links"
+device alongside your real synced devices.
+
+This is off by default — nothing changes until you configure a server via the
+popup's gear icon. Full setup (deploying the server, signing the iOS app,
+connecting the extension) is in [`SETUP.md`](SETUP.md).
+
 ## Troubleshooting
 
 ### No devices or tabs appear
@@ -58,11 +76,19 @@ Browser-internal pages such as new-tab, settings, and other non-transferable URL
 ## Files
 
 - `manifest.json` — Manifest V3 configuration
-- `popup.html` — popup markup
-- `popup.css` — interface styling
-- `popup.js` — sync-session loading, filtering, selection, and opening logic
+- `popup.html` / `popup.css` / `popup.js` — popup markup, styling, and
+  sync-session loading, filtering, selection, and opening logic
+- `options.html` / `options.css` / `options.js` — Shared Links server setup
+- `storage-keys.js` — `chrome.storage.local` key names shared by popup and options
 - `icons/` — extension icons
+- `server/` — PocketBase backend for Shared Links (Fly.io deploy config)
+- `ios/` — iOS container app + Share Extension for Shared Links
+- `SETUP.md` — deployment and device setup for Shared Links
 
 ## Privacy
 
-Everything runs locally inside Brave. The extension does not transmit, log, or persist your tab data.
+The synced-tabs feature is entirely local: it does not transmit, log, or
+persist your tab data, and makes no network calls. The optional Shared Links
+feature (see above) does make network calls, but only to a PocketBase server
+you deploy and control yourself, and only while it's configured in the popup's
+settings.

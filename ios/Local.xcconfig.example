@@ -1,0 +1,6 @@
+// Copy this file to Local.xcconfig (gitignored, never committed) and fill in
+// your own Apple Developer Team ID. Find it via Xcode → Settings → Accounts →
+// select your Apple ID → your team name shows the ID in parentheses, or run:
+//   security find-identity -v -p codesigning
+// and look at the parenthetical suffix on your "Apple Development: ..." entry.
+DEVELOPMENT_TEAM = YOUR_TEAM_ID

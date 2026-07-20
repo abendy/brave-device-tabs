@@ -1,0 +1,30 @@
+import Foundation
+
+/// Backed by an App Group so the container app's sign-in and the share
+/// extension's POST see the same server URL and token. A shared UserDefaults
+/// suite is enough for this — a personal single-user token doesn't need
+/// Keychain's at-rest encryption to justify the extra entitlement/signing
+/// fragility (Keychain access groups must match your Team ID exactly).
+enum SharedStore {
+    private static let suiteName = "group.com.abendy.devicetabs"
+    private static let serverURLKey = "pocketbaseServerURL"
+    private static let tokenKey = "pocketbaseAuthToken"
+
+    private static var defaults: UserDefaults? {
+        UserDefaults(suiteName: suiteName)
+    }
+
+    static var serverURL: URL? {
+        get { defaults?.string(forKey: serverURLKey).flatMap(URL.init(string:)) }
+        set { defaults?.set(newValue?.absoluteString, forKey: serverURLKey) }
+    }
+
+    static var authToken: String? {
+        get { defaults?.string(forKey: tokenKey) }
+        set { defaults?.set(newValue, forKey: tokenKey) }
+    }
+
+    static var isConfigured: Bool {
+        serverURL != nil && authToken != nil
+    }
+}

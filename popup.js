@@ -12,6 +12,7 @@ const elements = {
   deviceTemplate: document.querySelector("#device-template"),
   tabTemplate: document.querySelector("#tab-template"),
   refreshButton: document.querySelector("#refresh-button"),
+  settingsButton: document.querySelector("#settings-button"),
   searchInput: document.querySelector("#search-input"),
   selectVisibleButton: document.querySelector("#select-visible-button"),
   openAllButton: document.querySelector("#open-all-button"),
@@ -24,39 +25,96 @@ const elements = {
 document.addEventListener("DOMContentLoaded", initialize);
 
 function initialize() {
-  elements.refreshButton.addEventListener("click", loadDevices);
+  elements.refreshButton.addEventListener("click", refreshAll);
+  elements.settingsButton.addEventListener("click", () => chrome.runtime.openOptionsPage());
   elements.searchInput.addEventListener("input", handleFilterInput);
   elements.selectVisibleButton.addEventListener("click", toggleVisibleSelection);
   elements.openAllButton.addEventListener("click", openAllTabs);
   elements.openButton.addEventListener("click", openSelectedTabs);
-  loadDevices();
+  refreshAll();
 }
 
-async function loadDevices() {
+async function refreshAll() {
   if (state.loading) return;
 
   setLoading(true);
   hideStatus();
 
+  // Each loader swallows its own errors and resolves to a safe fallback, so
+  // one failing (e.g. no Shared Links server configured) never blocks the
+  // other from rendering.
+  const [syncedDevices, sharedDevice] = await Promise.all([
+    loadSyncedDevices(),
+    loadSharedLinksDevice(),
+  ]);
+
+  state.devices = sharedDevice ? [sharedDevice, ...syncedDevices] : syncedDevices;
+  removeStaleSelections();
+  setLoading(false);
+  render();
+}
+
+async function loadSyncedDevices() {
   try {
     if (!chrome.sessions?.getDevices) {
       throw new Error("This browser does not expose the synced-sessions API.");
     }
 
     const rawDevices = await getSyncedDevices();
-    state.devices = normalizeDevices(rawDevices);
-    removeStaleSelections();
+    return normalizeDevices(rawDevices);
   } catch (error) {
     console.error("Unable to load synced device tabs:", error);
-    state.devices = [];
     showStatus(
       "Could not read synced tabs. Confirm Brave Sync is enabled and “Open Tabs” is selected on both devices.",
       true
     );
-  } finally {
-    setLoading(false);
-    render();
+    return [];
   }
+}
+
+async function loadSharedLinksDevice() {
+  try {
+    const { [STORAGE_KEYS.serverUrl]: serverUrl, [STORAGE_KEYS.token]: token } = await chrome.storage.local.get([
+      STORAGE_KEYS.serverUrl,
+      STORAGE_KEYS.token,
+    ]);
+
+    if (!serverUrl || !token) return null;
+
+    const query = `filter=${encodeURIComponent("(opened=false)")}&sort=-created`;
+    const response = await fetch(`${serverUrl}/api/collections/shared_links/records?${query}`, {
+      headers: { Authorization: token },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Shared Links request failed (${response.status}).`);
+    }
+
+    const data = await response.json();
+    const tabs = (data.items ?? [])
+      .map(normalizeSharedLink)
+      .filter((tab) => tab.url && isOpenableUrl(tab.url));
+
+    if (tabs.length === 0) return null;
+
+    return { id: "shared-links", name: "Shared Links", tabs };
+  } catch (error) {
+    // Silent by design: an unconfigured or unreachable server must not
+    // block the synced-tabs list, which is the extension's core feature.
+    console.warn("Unable to load shared links:", error);
+    return null;
+  }
+}
+
+function normalizeSharedLink(record) {
+  const title = record.title?.trim() || readableUrl(record.url) || "Untitled link";
+
+  return {
+    id: `shared:${record.id}`,
+    title,
+    url: record.url,
+    searchable: `shared links ${record.source ?? ""} ${title} ${record.url}`.toLocaleLowerCase(),
+  };
 }
 
 // Brave versions differ in whether sessions.getDevices() returns a Promise.
@@ -383,12 +441,39 @@ async function openTabs(tabs, triggerButton) {
       await chrome.tabs.update(firstTabId, { active: true });
     }
 
+    // Awaited (not fire-and-forget) so the requests have a chance to land
+    // before window.close() tears down this document and cancels them.
+    await markSharedLinksOpened(tabs);
     window.close();
   } catch (error) {
     console.error("Unable to open selected tabs:", error);
     showStatus("Some tabs could not be opened. Try a smaller selection.", true);
     updateControls();
   }
+}
+
+async function markSharedLinksOpened(tabs) {
+  const sharedIds = tabs
+    .filter((tab) => tab.id.startsWith("shared:"))
+    .map((tab) => tab.id.slice("shared:".length));
+
+  if (sharedIds.length === 0) return;
+
+  const { [STORAGE_KEYS.serverUrl]: serverUrl, [STORAGE_KEYS.token]: token } = await chrome.storage.local.get([
+    STORAGE_KEYS.serverUrl,
+    STORAGE_KEYS.token,
+  ]);
+  if (!serverUrl || !token) return;
+
+  await Promise.all(
+    sharedIds.map((id) =>
+      fetch(`${serverUrl}/api/collections/shared_links/records/${id}`, {
+        method: "PATCH",
+        headers: { Authorization: token, "Content-Type": "application/json" },
+        body: JSON.stringify({ opened: true }),
+      }).catch((error) => console.warn(`Could not mark shared link ${id} opened:`, error))
+    )
+  );
 }
 
 function getCurrentWindowId() {

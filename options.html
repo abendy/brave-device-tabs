@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Device Tabs Picker — Shared Links Setup</title>
+  <link rel="stylesheet" href="popup.css">
+  <link rel="stylesheet" href="options.css">
+</head>
+<body class="options-body">
+  <main class="app" aria-labelledby="app-title">
+    <header class="app-header">
+      <div class="orbs" aria-hidden="true">
+        <span class="orb orb-red"></span><span class="orb orb-yellow"></span><span class="orb orb-green"></span>
+      </div>
+      <h1 id="app-title">Shared <em>links</em></h1>
+    </header>
+
+    <div class="options-body-inner">
+      <p class="options-intro">
+        Connect the extension to your PocketBase server so links shared from
+        your iPhone show up here as a “Shared Links” device. Leave this unset
+        and the extension behaves exactly as before.
+      </p>
+
+      <div id="status" class="status" hidden role="status"></div>
+
+      <section id="connected-panel" class="options-panel" hidden>
+        <p class="options-connected">
+          Connected to <strong id="connected-url"></strong>
+        </p>
+        <button id="sign-out-button" class="secondary-button" type="button">Sign Out</button>
+      </section>
+
+      <form id="setup-form" class="options-panel">
+        <label class="field">
+          <span class="field-label">Server URL</span>
+          <input id="server-url" type="url" placeholder="https://your-app.fly.dev" autocomplete="off" required>
+        </label>
+        <label class="field">
+          <span class="field-label">Email</span>
+          <input id="email" type="email" autocomplete="username" required>
+        </label>
+        <label class="field">
+          <span class="field-label">Password</span>
+          <input id="password" type="password" autocomplete="current-password" required>
+        </label>
+        <button id="sign-in-button" class="primary-button" type="submit">Sign In</button>
+      </form>
+    </div>
+  </main>
+
+  <script src="storage-keys.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

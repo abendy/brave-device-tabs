@@ -6,8 +6,14 @@
   "minimum_chrome_version": "88",
   "permissions": [
     "sessions",
-    "tabs"
+    "tabs",
+    "storage",
+    "permissions"
   ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
+  "options_page": "options.html",
   "action": {
     "default_title": "Device Tabs Picker",
     "default_popup": "popup.html",

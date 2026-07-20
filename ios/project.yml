@@ -1,0 +1,75 @@
+# Rename the bundle id prefix below before you pick a real Team in Xcode —
+# com.abendy.devicetabs is just a placeholder derived from the repo owner's
+# git username. It's the only place the prefix needs to change.
+name: DeviceTabsShare
+options:
+  bundleIdPrefix: com.abendy.devicetabs
+  deploymentTarget:
+    iOS: "16.0"
+# DEVELOPMENT_TEAM lives in Local.xcconfig (gitignored, personal to whoever
+# is building) instead of here, so a real Team ID never ends up committed.
+# Copy Local.xcconfig.example to Local.xcconfig and fill in your own team.
+configFiles:
+  Debug: Local.xcconfig
+  Release: Local.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  DeviceTabsShare:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+      - path: Shared
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Device Tabs Share
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+    entitlements:
+      path: App/DeviceTabsShare.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.abendy.devicetabs
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.abendy.devicetabs
+    dependencies:
+      - target: ShareExtension
+        embed: true
+    # xcodegen's default scheme autogeneration skips this target, apparently
+    # because its name collides with the project name (`name: DeviceTabsShare`
+    # above) — force it explicitly so it shows up in Xcode's scheme picker.
+    scheme: {}
+
+  ShareExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ShareExtension
+      - path: Shared
+    info:
+      path: ShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Save to Device Tabs
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
+    entitlements:
+      path: ShareExtension/ShareExtension.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.abendy.devicetabs
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.abendy.devicetabs.Share
