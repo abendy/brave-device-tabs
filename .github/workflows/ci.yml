@@ -21,10 +21,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           cache: pnpm
+          cache-dependency-path: extension/pnpm-lock.yaml
           node-version: 24
 
       - name: Install dependencies
+        working-directory: extension
         run: pnpm install --frozen-lockfile
 
       - name: Verify
+        working-directory: extension
         run: pnpm verify

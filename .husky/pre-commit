@@ -1,1 +1,1 @@
-pnpm verify
+pnpm --dir extension verify
