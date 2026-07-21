@@ -75,7 +75,8 @@ enum PocketBaseClient {
         ]
         guard let url = components.url else { throw PocketBaseError.invalidResponse }
 
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         request.setValue(token, forHTTPHeaderField: "Authorization")
 
         let (data, response) = try await URLSession.shared.data(for: request)

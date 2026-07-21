@@ -5,7 +5,7 @@ name: DeviceTabsShare
 options:
   bundleIdPrefix: com.abendy.devicetabs
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "26.0"
 # DEVELOPMENT_TEAM lives in Local.xcconfig (gitignored, personal to whoever
 # is building) instead of here, so a real Team ID never ends up committed.
 # Copy Local.xcconfig.example to Local.xcconfig and fill in your own team.

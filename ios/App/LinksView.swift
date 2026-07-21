@@ -7,10 +7,12 @@ import UniformTypeIdentifiers
 struct LinksView: View {
     var onOpenSettings: () -> Void
 
+    @Environment(\.scenePhase) private var scenePhase
     @State private var links: [SharedLink] = []
     @State private var groupTitles: [String] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var hasCompletedInitialLoad = false
     @State private var dragContext: LinkDragContext?
     @State private var moveErrorMessage: String?
 
@@ -30,8 +32,14 @@ struct LinksView: View {
                         .accessibilityLabel("Settings")
                     }
                 }
-                .task { await load() }
-                .refreshable { await load() }
+                .task {
+                    await load()
+                    hasCompletedInitialLoad = true
+                }
+                .onChange(of: scenePhase) { _, newPhase in
+                    guard newPhase == .active, hasCompletedInitialLoad else { return }
+                    Task { await load() }
+                }
                 .alert(
                     "Couldn't move link",
                     isPresented: Binding(
@@ -62,7 +70,7 @@ struct LinksView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                Button("Retry") { Task { await load() } }
+                Button("Retry", action: retryLoad)
             }
             .padding()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -89,6 +97,20 @@ struct LinksView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
+            }
+            .scrollBounceBehavior(.always)
+            .refreshable { await load() }
+            .alert(
+                "Couldn't refresh links",
+                isPresented: Binding(
+                    get: { errorMessage != nil && !links.isEmpty },
+                    set: { if !$0 { errorMessage = nil } }
+                )
+            ) {
+                Button("Retry", action: retryLoad)
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(errorMessage ?? "The links could not be refreshed.")
             }
             .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
         }
@@ -165,15 +187,28 @@ struct LinksView: View {
         }
     }
 
-    private func load() async {
-        guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else { return }
-        isLoading = true
+    private func retryLoad() {
+        if links.isEmpty {
+            isLoading = true
+        }
         errorMessage = nil
+        Task { await load() }
+    }
+
+    private func load() async {
+        guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
+            isLoading = false
+            errorMessage = PocketBaseError.notConfigured.localizedDescription
+            return
+        }
 
         async let groupTitlesTask = PocketBaseClient.fetchGroupTitles(serverURL: serverURL, token: token)
         do {
-            links = try await PocketBaseClient.fetchSharedLinks()
-            groupTitles = await groupTitlesTask
+            let fetchedLinks = try await PocketBaseClient.fetchSharedLinks()
+            let fetchedGroupTitles = await groupTitlesTask
+            links = fetchedLinks
+            groupTitles = fetchedGroupTitles
+            errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }

@@ -249,3 +249,20 @@ before building:
   its own Form, Picker, and Cancel/Post toolbar built from scratch. If a
   share extension needs custom UI beyond a single text field, building it
   this way from the start would have saved a lot of round-trips.
+- **Mutating `@State` before the first `await` inside a `.refreshable`
+  closure can cancel the refresh itself.** `LinksView`'s `load()` used to set
+  `isLoading = true` synchronously before fetching. Even though that state
+  change didn't visibly switch which branch of the view's `@ViewBuilder`
+  conditional rendered (the list was already non-empty, so it stayed on the
+  `ScrollView` case), the resulting body re-evaluation still cancelled
+  `.refreshable`'s in-flight task — confirmed via tagged `NSLog` output
+  showing the fetch start and then a `CancellationError` within ~13ms of the
+  pull gesture. This was invisible in the UI because the error branch only
+  rendered when `links.isEmpty`, so a cancelled refresh just looked like
+  pull-to-refresh silently doing nothing — easy to misdiagnose as a caching
+  or networking problem instead (server freshness, auth, and scene-phase
+  delivery were all separately ruled out with authenticated `curl` and
+  instrumented logs before this was found). Fix: don't mutate any `@State`
+  that the view body reads until *after* all the async work in `load()`
+  completes — assign `links`/`groupTitles` together at the end, and only
+  flip `isLoading` when there's genuinely nothing on screen yet.
