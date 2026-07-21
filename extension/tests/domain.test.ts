@@ -1,14 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  filterOpenedTabs,
   formatBatchTime,
-  getOpenedIdSet,
   groupSharedLinksByDestination,
   normalizeDevices,
   normalizeSharedLink,
   resolveTabDestination,
 } from "../src/popup/domain";
-import type { Device, DeviceTab, OpenedBatch } from "../src/popup/types";
+import type { DeviceTab } from "../src/popup/types";
 
 const TODAY_PREFIX = /^Today at /;
 
@@ -49,21 +47,6 @@ describe("popup domain", () => {
     ]);
   });
 
-  it("removes opened items from current devices", () => {
-    const devices = [deviceWithTabs(sharedTab("one", null), sharedTab("two", null))];
-    const history: OpenedBatch[] = [
-      {
-        id: "batch",
-        items: [{ id: "shared:one", source: "iPhone", title: "One", url: "https://one.test" }],
-        openedAt: "2026-07-20T12:00:00.000Z",
-      },
-    ];
-
-    const filtered = filterOpenedTabs(devices, getOpenedIdSet(history));
-
-    expect(filtered[0]?.tabs.map((tab) => tab.id)).toEqual(["shared:two"]);
-  });
-
   it("matches tab-group destinations without case sensitivity and otherwise falls back", () => {
     const tab = sharedTab("one", "Research");
     const groups = [{ id: 9, title: " research ", windowId: 12 }] as chrome.tabGroups.TabGroup[];
@@ -90,8 +73,4 @@ function sharedTab(id: string, destination: string | null): DeviceTab {
     title: `Link ${id}`,
     url: `https://${id}.test`,
   });
-}
-
-function deviceWithTabs(...tabs: DeviceTab[]): Device {
-  return { id: "shared-links:none", name: "Shared Links", tabs };
 }

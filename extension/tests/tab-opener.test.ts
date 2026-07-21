@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { markSharedLinksOpened } from "../src/popup/shared-links";
 import { recordOpenedBatch } from "../src/popup/storage";
-import { openTabsInBrowser } from "../src/popup/tab-opener";
+import { OpenedTabsCleanupError, openTabsInBrowser } from "../src/popup/tab-opener";
 import type { DeviceTab } from "../src/popup/types";
 
 vi.mock("../src/popup/shared-links", () => ({ markSharedLinksOpened: vi.fn() }));
@@ -52,6 +52,17 @@ describe("openTabsInBrowser", () => {
 
     const activationOrder = updateTab.mock.invocationCallOrder[0] ?? 0;
     expect(vi.mocked(recordOpenedBatch).mock.invocationCallOrder[0]).toBeLessThan(activationOrder);
+  });
+
+  it("surfaces a server update failure without recording false opened history", async () => {
+    vi.mocked(markSharedLinksOpened).mockRejectedValueOnce(new Error("PATCH failed"));
+
+    await expect(openTabsInBrowser([tab("shared:one", "Research")])).rejects.toBeInstanceOf(
+      OpenedTabsCleanupError,
+    );
+
+    expect(recordOpenedBatch).not.toHaveBeenCalled();
+    expect(updateTab).toHaveBeenCalledWith(11, { active: true });
   });
 });
 

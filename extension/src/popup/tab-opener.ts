@@ -8,6 +8,14 @@ interface FirstCreatedTab {
   windowId: number;
 }
 
+export class OpenedTabsCleanupError extends Error {
+  constructor(cause: unknown) {
+    const detail = cause instanceof Error ? ` ${cause.message}` : "";
+    super(`The tabs opened, but their shared links could not be cleared.${detail}`, { cause });
+    this.name = "OpenedTabsCleanupError";
+  }
+}
+
 export async function openTabsInBrowser(tabs: DeviceTab[]): Promise<void> {
   if (tabs.length === 0) {
     return;
@@ -17,7 +25,12 @@ export async function openTabsInBrowser(tabs: DeviceTab[]): Promise<void> {
   const liveGroups = chrome.tabGroups?.query ? await chrome.tabGroups.query({}) : [];
   const firstTab = await createBrowserTabs(tabs, currentWindowId, liveGroups);
 
-  await markSharedLinksOpened(tabs);
+  try {
+    await markSharedLinksOpened(tabs);
+  } catch (error) {
+    await activateFirstTab(firstTab, currentWindowId);
+    throw new OpenedTabsCleanupError(error);
+  }
   await recordOpenedBatch(tabs);
   await activateFirstTab(firstTab, currentWindowId);
 }

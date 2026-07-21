@@ -97,12 +97,6 @@ function compareDestinations(left: string, right: string): number {
   return left.localeCompare(right);
 }
 
-export function filterOpenedTabs(devices: Device[], openedIds: ReadonlySet<string>): Device[] {
-  return devices
-    .map((device) => ({ ...device, tabs: device.tabs.filter((tab) => !openedIds.has(tab.id)) }))
-    .filter((device) => device.tabs.length > 0);
-}
-
 export function getOpenedIdSet(history: OpenedBatch[]): Set<string> {
   const ids = new Set<string>();
   for (const batch of history) {

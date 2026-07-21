@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { filterOpenedTabs, getOpenedIdSet, getVisibleDevices } from "./domain";
+import { getOpenedIdSet, getVisibleDevices } from "./domain";
 import type { PopupServices } from "./popup-services";
+import { OpenedTabsCleanupError } from "./tab-opener";
 import type {
   ActiveView,
   Device,
@@ -85,8 +86,7 @@ export function usePopupController(
         services.loadSharedLinksDevices(),
         services.loadOpenedHistory(),
       ]);
-      const openedIds = getOpenedIdSet(openedHistory);
-      const nextLinkDevices = filterOpenedTabs(sharedDevices, openedIds);
+      const nextLinkDevices = sharedDevices;
       const nextDeviceDevices = syncedResult.devices;
 
       setHistory(openedHistory);
@@ -173,7 +173,10 @@ export function usePopupController(
         console.error("Unable to open selected tabs:", error);
         setStatus({
           kind: "error",
-          text: "Some tabs could not be opened. Try a smaller selection.",
+          text:
+            error instanceof OpenedTabsCleanupError
+              ? error.message
+              : "Some tabs could not be opened. Try a smaller selection.",
         });
       } finally {
         setOpeningMode(null);

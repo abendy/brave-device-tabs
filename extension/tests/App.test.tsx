@@ -55,6 +55,25 @@ describe("App", () => {
     expect(container.querySelector(".tab-opened-badge")?.textContent).toBe("Opened");
   });
 
+  it("keeps a server-returned shared link visible even when local history says it opened", async () => {
+    const shared = { ...tab("shared:stale", "Stale shared link"), id: "shared:stale" };
+    const services = servicesWith([]);
+    services.loadSharedLinksDevices = async () => [
+      { id: "shared-links:none", name: "Shared Links", tabs: [shared] },
+    ];
+    services.loadOpenedHistory = async () => [
+      {
+        id: "batch",
+        items: [shared],
+        openedAt: new Date().toISOString(),
+      },
+    ];
+
+    await renderApp(root, services, vi.fn());
+
+    expect(container.textContent).toContain("Stale shared link");
+  });
+
   it("filters, selects visible tabs, and opens only the selection", async () => {
     const alpha = tab("alpha", "Alpha article");
     const beta = tab("beta", "Beta article");

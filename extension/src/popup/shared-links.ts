@@ -68,21 +68,20 @@ export async function markSharedLinksOpened(tabs: DeviceTab[]): Promise<void> {
 
   const { serverUrl, token } = await readServerConfig();
   if (!serverUrl || !token) {
-    return;
+    throw new Error("The Shared Links server is not configured.");
   }
 
   await Promise.all(sharedIds.map((id) => markSharedLinkOpened(serverUrl, token, id)));
 }
 
 async function markSharedLinkOpened(serverUrl: string, token: string, id: string): Promise<void> {
-  try {
-    await fetch(`${serverUrl}/api/collections/shared_links/records/${id}`, {
-      body: JSON.stringify({ opened: true }),
-      headers: { Authorization: token, "Content-Type": "application/json" },
-      method: "PATCH",
-    });
-  } catch (error) {
-    console.warn(`Could not mark shared link ${id} opened:`, error);
+  const response = await fetch(`${serverUrl}/api/collections/shared_links/records/${id}`, {
+    body: JSON.stringify({ opened: true }),
+    headers: { Authorization: token, "Content-Type": "application/json" },
+    method: "PATCH",
+  });
+  if (!response.ok) {
+    throw new Error(`Marking shared link ${id} opened failed (${response.status}).`);
   }
 }
 
