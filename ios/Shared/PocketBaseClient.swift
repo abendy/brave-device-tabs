@@ -14,6 +14,14 @@ enum PocketBaseError: Error, LocalizedError {
     }
 }
 
+struct SharedLink: Identifiable, Decodable, Equatable {
+    let id: String
+    let url: String
+    let title: String?
+    let source: String?
+    let destination: String?
+}
+
 enum PocketBaseClient {
     static func login(serverURL: URL, email: String, password: String) async throws -> String {
         var request = URLRequest(url: serverURL.appendingPathComponent("api/collections/users/auth-with-password"))
@@ -50,6 +58,55 @@ enum PocketBaseClient {
         guard let http = response as? HTTPURLResponse else { throw PocketBaseError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
             throw PocketBaseError.server(errorMessage(from: data) ?? "Could not save the link (\(http.statusCode)).")
+        }
+    }
+
+    static func fetchSharedLinks() async throws -> [SharedLink] {
+        guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
+            throw PocketBaseError.notConfigured
+        }
+        guard var components = URLComponents(
+            url: serverURL.appendingPathComponent("api/collections/shared_links/records"),
+            resolvingAgainstBaseURL: false
+        ) else { throw PocketBaseError.invalidResponse }
+        components.queryItems = [
+            URLQueryItem(name: "filter", value: "(opened=false)"),
+            URLQueryItem(name: "sort", value: "-created"),
+        ]
+        guard let url = components.url else { throw PocketBaseError.invalidResponse }
+
+        var request = URLRequest(url: url)
+        request.setValue(token, forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw PocketBaseError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            throw PocketBaseError.server(errorMessage(from: data) ?? "Could not load links (\(http.statusCode)).")
+        }
+
+        struct ListResponse: Decodable { let items: [SharedLink] }
+        return try JSONDecoder().decode(ListResponse.self, from: data).items
+    }
+
+    /// Empty string clears the destination, matching how the extension
+    /// treats an empty `destination` as "no group" throughout.
+    static func updateLinkDestination(id: String, destination: String?) async throws {
+        guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
+            throw PocketBaseError.notConfigured
+        }
+
+        var request = URLRequest(
+            url: serverURL.appendingPathComponent("api/collections/shared_links/records/\(id)")
+        )
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(token, forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONEncoder().encode(["destination": destination ?? ""])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw PocketBaseError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            throw PocketBaseError.server(errorMessage(from: data) ?? "Could not move the link (\(http.statusCode)).")
         }
     }
 

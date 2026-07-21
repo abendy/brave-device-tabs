@@ -1,6 +1,9 @@
 import SwiftUI
 
 struct ContentView: View {
+    var onSignedIn: (() -> Void)?
+    var onSignedOut: (() -> Void)?
+
     @State private var serverURLText: String = SharedStore.serverURL?.absoluteString ?? ""
     @State private var email: String = ""
     @State private var password: String = ""
@@ -83,6 +86,7 @@ struct ContentView: View {
             SharedStore.authToken = token
             isSignedIn = true
             password = ""
+            onSignedIn?()
         } catch {
             statusIsError = true
             statusMessage = error.localizedDescription
@@ -93,5 +97,6 @@ struct ContentView: View {
         SharedStore.serverURL = nil
         SharedStore.authToken = nil
         isSignedIn = false
+        onSignedOut?()
     }
 }
