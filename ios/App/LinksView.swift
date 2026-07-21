@@ -15,6 +15,7 @@ struct LinksView: View {
     @State private var hasCompletedInitialLoad = false
     @State private var dragContext: LinkDragContext?
     @State private var moveErrorMessage: String?
+    @State private var deleteErrorMessage: String?
 
     private static let noGroupTitle = "No group"
 
@@ -50,6 +51,17 @@ struct LinksView: View {
                     Button("OK", role: .cancel) {}
                 } message: {
                     Text(moveErrorMessage ?? "The link could not be moved.")
+                }
+                .alert(
+                    "Couldn't delete link",
+                    isPresented: Binding(
+                        get: { deleteErrorMessage != nil },
+                        set: { if !$0 { deleteErrorMessage = nil } }
+                    )
+                ) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text(deleteErrorMessage ?? "The link could not be deleted.")
                 }
         }
     }
@@ -89,7 +101,8 @@ struct LinksView: View {
                             destination: noGroupSection.destination,
                             links: noGroupSection.links,
                             dragContext: $dragContext,
-                            onDrop: move
+                            onDrop: move,
+                            onDelete: delete
                         )
                     }
 
@@ -97,7 +110,8 @@ struct LinksView: View {
                         WindowGroupDisclosure(
                             window: window,
                             dragContext: $dragContext,
-                            onDrop: move
+                            onDrop: move,
+                            onDelete: delete
                         )
                     }
                 }
@@ -253,6 +267,21 @@ struct LinksView: View {
         }
     }
 
+    private func delete(linkID: String) {
+        guard let index = links.firstIndex(where: { $0.id == linkID }) else { return }
+        let deletedLink = links.remove(at: index)
+
+        Task {
+            do {
+                try await PocketBaseClient.deleteSharedLink(id: linkID)
+            } catch {
+                guard !links.contains(where: { $0.id == linkID }) else { return }
+                links.insert(deletedLink, at: min(index, links.count))
+                deleteErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
     private func retryLoad() {
         if links.isEmpty {
             isLoading = true
@@ -286,6 +315,7 @@ private struct WindowGroupDisclosure: View {
     let window: LinksView.WindowSection
     @Binding var dragContext: LinkDragContext?
     let onDrop: (_ linkID: String, _ destination: String?) -> Void
+    let onDelete: (_ linkID: String) -> Void
 
     @State private var isExpanded = true
 
@@ -293,7 +323,12 @@ private struct WindowGroupDisclosure: View {
         DisclosureGroup(isExpanded: $isExpanded) {
             LazyVStack(alignment: .leading, spacing: 10) {
                 ForEach(window.groups) { group in
-                    TabGroupDisclosure(group: group, dragContext: $dragContext, onDrop: onDrop)
+                    TabGroupDisclosure(
+                        group: group,
+                        dragContext: $dragContext,
+                        onDrop: onDrop,
+                        onDelete: onDelete
+                    )
                 }
             }
             .padding(.top, 10)
@@ -323,6 +358,7 @@ private struct TabGroupDisclosure: View {
     let group: LinksView.LinkSection
     @Binding var dragContext: LinkDragContext?
     let onDrop: (_ linkID: String, _ destination: String?) -> Void
+    let onDelete: (_ linkID: String) -> Void
 
     @State private var isExpanded = false
     @State private var isTargeted = false
@@ -334,7 +370,8 @@ private struct TabGroupDisclosure: View {
                 destination: group.destination,
                 links: group.links,
                 dragContext: $dragContext,
-                onDrop: onDrop
+                onDrop: onDrop,
+                onDelete: onDelete
             )
             .padding(.top, 8)
         } label: {
@@ -382,6 +419,7 @@ private struct GroupDropTarget: View {
     let links: [SharedLink]
     @Binding var dragContext: LinkDragContext?
     let onDrop: (_ linkID: String, _ destination: String?) -> Void
+    let onDelete: (_ linkID: String) -> Void
 
     @State private var isTargeted = false
 
@@ -433,17 +471,83 @@ private struct GroupDropTarget: View {
                             .padding(.leading, 16)
                     }
 
-                    LinkRow(link: link)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
+                    SwipeToDeleteLinkRow(link: link, onDelete: onDelete)
                         .contentShape(Rectangle())
-                        .accessibilityHint("Drag to move this link to another group")
+                        .accessibilityHint("Swipe left to delete, or drag to move this link")
                         .onDrag {
                             dragContext = LinkDragContext(linkID: link.id, sourceSectionID: sectionID)
                             return NSItemProvider(object: link.id as NSString)
                         }
                 }
             }
+        }
+    }
+}
+
+private struct SwipeToDeleteLinkRow: View {
+    let link: SharedLink
+    let onDelete: (_ linkID: String) -> Void
+
+    @State private var offset: CGFloat = 0
+    @State private var dragStartOffset: CGFloat = 0
+
+    private let actionWidth: CGFloat = 76
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            Button(role: .destructive) {
+                onDelete(link.id)
+            } label: {
+                VStack(spacing: 4) {
+                    Image(systemName: "trash")
+                    Text("Delete")
+                        .font(.caption)
+                }
+                .foregroundStyle(.white)
+                .frame(width: actionWidth)
+                .frame(maxHeight: .infinity)
+            }
+            .buttonStyle(.plain)
+            .background(Color.red)
+
+            LinkRow(link: link)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(uiColor: .secondarySystemGroupedBackground))
+                .offset(x: offset)
+                .gesture(swipeGesture)
+                .onTapGesture {
+                    guard offset != 0 else { return }
+                    settle(at: 0)
+                }
+        }
+        .clipped()
+        .accessibilityAction(named: "Delete") {
+            onDelete(link.id)
+        }
+    }
+
+    private var swipeGesture: some Gesture {
+        DragGesture(minimumDistance: 18)
+            .onChanged { value in
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                offset = min(0, max(-actionWidth, dragStartOffset + value.translation.width))
+            }
+            .onEnded { value in
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                if value.predictedEndTranslation.width < -actionWidth * 1.6 {
+                    onDelete(link.id)
+                } else {
+                    settle(at: offset < -actionWidth / 2 ? -actionWidth : 0)
+                }
+            }
+    }
+
+    private func settle(at target: CGFloat) {
+        withAnimation(.easeOut(duration: 0.18)) {
+            offset = target
+            dragStartOffset = target
         }
     }
 }

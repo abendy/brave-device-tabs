@@ -131,6 +131,24 @@ enum PocketBaseClient {
         }
     }
 
+    static func deleteSharedLink(id: String) async throws {
+        guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
+            throw PocketBaseError.notConfigured
+        }
+
+        var request = URLRequest(
+            url: serverURL.appendingPathComponent("api/collections/shared_links/records/\(id)")
+        )
+        request.httpMethod = "DELETE"
+        request.setValue(token, forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw PocketBaseError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) || http.statusCode == 404 else {
+            throw PocketBaseError.server(errorMessage(from: data) ?? "Could not delete the link (\(http.statusCode)).")
+        }
+    }
+
     /// Best-effort: an empty list just means the cycling picker only offers
     /// "No group" - a fetch failure here must never block sharing.
     static func fetchGroupTitles(serverURL: URL, token: String) async -> [String] {
