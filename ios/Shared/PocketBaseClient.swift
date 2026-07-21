@@ -22,6 +22,26 @@ struct SharedLink: Identifiable, Decodable, Equatable {
     let destination: String?
 }
 
+struct BrowserGroup: Decodable, Equatable {
+    let title: String
+    let windowID: Int
+    let index: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case title
+        case windowID = "windowId"
+        case index
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decode(String.self, forKey: .title)
+        // Records written by older extension builds did not include windowId.
+        windowID = try container.decodeIfPresent(Int.self, forKey: .windowID) ?? -1
+        index = try container.decodeIfPresent(Int.self, forKey: .index) ?? .max
+    }
+}
+
 enum PocketBaseClient {
     static func login(serverURL: URL, email: String, password: String) async throws -> String {
         var request = URLRequest(url: serverURL.appendingPathComponent("api/collections/users/auth-with-password"))
@@ -114,6 +134,12 @@ enum PocketBaseClient {
     /// Best-effort: an empty list just means the cycling picker only offers
     /// "No group" - a fetch failure here must never block sharing.
     static func fetchGroupTitles(serverURL: URL, token: String) async -> [String] {
+        await fetchBrowserGroups(serverURL: serverURL, token: token).map(\.title)
+    }
+
+    /// Best-effort for the same reason as `fetchGroupTitles`: callers can
+    /// continue with an empty group list when the browser has not synced yet.
+    static func fetchBrowserGroups(serverURL: URL, token: String) async -> [BrowserGroup] {
         guard var components = URLComponents(
             url: serverURL.appendingPathComponent("api/collections/browser_groups/records"),
             resolvingAgainstBaseURL: false
@@ -128,12 +154,11 @@ enum PocketBaseClient {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return [] }
 
-            struct Group: Decodable { let title: String }
-            struct Record: Decodable { let groups: [Group] }
+            struct Record: Decodable { let groups: [BrowserGroup] }
             struct ListResponse: Decodable { let items: [Record] }
 
             let list = try JSONDecoder().decode(ListResponse.self, from: data)
-            return list.items.first?.groups.map(\.title) ?? []
+            return list.items.first?.groups ?? []
         } catch {
             return []
         }

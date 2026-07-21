@@ -9,7 +9,7 @@ struct LinksView: View {
 
     @Environment(\.scenePhase) private var scenePhase
     @State private var links: [SharedLink] = []
-    @State private var groupTitles: [String] = []
+    @State private var browserGroups: [BrowserGroup] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var hasCompletedInitialLoad = false
@@ -77,22 +77,28 @@ struct LinksView: View {
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
-                    ForEach(sections) { section in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(section.title)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .textCase(.uppercase)
-                                .padding(.horizontal, 4)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(noGroupSection.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .textCase(.uppercase)
+                            .padding(.horizontal, 4)
 
-                            GroupDropTarget(
-                                sectionID: section.id,
-                                destination: section.destination,
-                                links: section.links,
-                                dragContext: $dragContext,
-                                onDrop: move
-                            )
-                        }
+                        GroupDropTarget(
+                            sectionID: noGroupSection.id,
+                            destination: noGroupSection.destination,
+                            links: noGroupSection.links,
+                            dragContext: $dragContext,
+                            onDrop: move
+                        )
+                    }
+
+                    ForEach(windowSections) { window in
+                        WindowGroupDisclosure(
+                            window: window,
+                            dragContext: $dragContext,
+                            onDrop: move
+                        )
                     }
                 }
                 .padding(.horizontal, 16)
@@ -117,11 +123,18 @@ struct LinksView: View {
     }
 
     fileprivate struct LinkSection: Identifiable {
-        var id: String { destination.map { "group:\($0)" } ?? "no-group" }
+        let id: String
         let title: String
+        let sortIndex: Int
         /// nil clears the link's destination; matches `move(linkID:to:)`.
         let destination: String?
         let links: [SharedLink]
+    }
+
+    fileprivate struct WindowSection: Identifiable {
+        let id: String
+        let title: String
+        let groups: [LinkSection]
     }
 
     /// Treats nil, empty, and whitespace-only destinations as the same "no
@@ -135,7 +148,7 @@ struct LinksView: View {
         return trimmed
     }
 
-    private var sections: [LinkSection] {
+    private var groupedLinks: (byDestination: [String: [SharedLink]], noGroup: [SharedLink]) {
         var byDestination: [String: [SharedLink]] = [:]
         var noGroup: [SharedLink] = []
         for link in links {
@@ -146,19 +159,72 @@ struct LinksView: View {
             }
         }
 
-        var titles: [String] = []
-        for title in groupTitles.compactMap({ normalizedDestination($0) }) where !titles.contains(title) {
-            titles.append(title)
-        }
-        for destination in byDestination.keys where !titles.contains(destination) {
-            titles.append(destination)
-        }
-        titles.sort { $0.localizedStandardCompare($1) == .orderedAscending }
+        return (byDestination, noGroup)
+    }
 
-        let groupSections = titles.map { title in
-            LinkSection(title: title, destination: title, links: byDestination[title] ?? [])
+    private var noGroupSection: LinkSection {
+        LinkSection(
+            id: "no-group", title: Self.noGroupTitle, sortIndex: 0,
+            destination: nil, links: groupedLinks.noGroup
+        )
+    }
+
+    private var windowSections: [WindowSection] {
+        let linksByDestination = groupedLinks.byDestination
+        var seenGroups = Set<String>()
+        var claimedDestinations = Set<String>()
+        var groupsByWindow: [Int: [LinkSection]] = [:]
+
+        for group in browserGroups {
+            guard let title = normalizedDestination(group.title) else { continue }
+            let groupKey = "\(group.windowID):\(title)"
+            guard seenGroups.insert(groupKey).inserted else { continue }
+            let isDestinationOwner = claimedDestinations.insert(title).inserted
+            groupsByWindow[group.windowID, default: []].append(
+                LinkSection(
+                    id: "window:\(group.windowID):group:\(title)",
+                    title: title,
+                    sortIndex: group.index,
+                    destination: title,
+                    links: isDestinationOwner ? linksByDestination[title] ?? [] : []
+                )
+            )
         }
-        return [LinkSection(title: Self.noGroupTitle, destination: nil, links: noGroup)] + groupSections
+
+        var windows = groupsByWindow.keys.sorted().map { windowID in
+            WindowSection(
+                id: "window:\(windowID)",
+                title: "Tab Groups",
+                groups: (groupsByWindow[windowID] ?? []).sorted {
+                    $0.sortIndex == $1.sortIndex
+                        ? $0.title.localizedStandardCompare($1.title) == .orderedAscending
+                        : $0.sortIndex < $1.sortIndex
+                }
+            )
+        }
+
+        let unknownDestinations = linksByDestination.keys.filter { !claimedDestinations.contains($0) }.sorted {
+            $0.localizedStandardCompare($1) == .orderedAscending
+        }
+        if !unknownDestinations.isEmpty {
+            windows.append(
+                WindowSection(
+                    id: "window:unknown",
+                    title: "Other groups",
+                    groups: unknownDestinations.map { title in
+                        LinkSection(
+                            id: "window:unknown:group:\(title)",
+                            title: title,
+                            sortIndex: .max,
+                            destination: title,
+                            links: linksByDestination[title] ?? []
+                        )
+                    }
+                )
+            )
+        }
+
+        return windows
     }
 
     private func move(linkID: String, to destination: String?) {
@@ -202,17 +268,103 @@ struct LinksView: View {
             return
         }
 
-        async let groupTitlesTask = PocketBaseClient.fetchGroupTitles(serverURL: serverURL, token: token)
+        async let browserGroupsTask = PocketBaseClient.fetchBrowserGroups(serverURL: serverURL, token: token)
         do {
             let fetchedLinks = try await PocketBaseClient.fetchSharedLinks()
-            let fetchedGroupTitles = await groupTitlesTask
+            let fetchedBrowserGroups = await browserGroupsTask
             links = fetchedLinks
-            groupTitles = fetchedGroupTitles
+            browserGroups = fetchedBrowserGroups
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+}
+
+private struct WindowGroupDisclosure: View {
+    let window: LinksView.WindowSection
+    @Binding var dragContext: LinkDragContext?
+    let onDrop: (_ linkID: String, _ destination: String?) -> Void
+
+    @State private var isExpanded = true
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            LazyVStack(alignment: .leading, spacing: 10) {
+                ForEach(window.groups) { group in
+                    TabGroupDisclosure(group: group, dragContext: $dragContext, onDrop: onDrop)
+                }
+            }
+            .padding(.top, 10)
+            .padding(.leading, 8)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "macwindow")
+                    .foregroundStyle(.secondary)
+                Text(window.title)
+                    .font(.headline)
+            }
+        }
+        .tint(.primary)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(uiColor: .secondarySystemGroupedBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color(uiColor: .separator).opacity(0.45), lineWidth: 1)
+        )
+    }
+}
+
+private struct TabGroupDisclosure: View {
+    let group: LinksView.LinkSection
+    @Binding var dragContext: LinkDragContext?
+    let onDrop: (_ linkID: String, _ destination: String?) -> Void
+
+    @State private var isExpanded = false
+    @State private var isTargeted = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            GroupDropTarget(
+                sectionID: group.id,
+                destination: group.destination,
+                links: group.links,
+                dragContext: $dragContext,
+                onDrop: onDrop
+            )
+            .padding(.top, 8)
+        } label: {
+            HStack {
+                Text(group.title)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("\(group.links.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 6)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isTargeted ? Color.accentColor.opacity(0.12) : Color.clear)
+            )
+            .contentShape(Rectangle())
+            .onDrop(
+                of: [.plainText],
+                delegate: LinkDropDelegate(
+                    sectionID: group.id,
+                    destination: group.destination,
+                    dragContext: $dragContext,
+                    isTargeted: $isTargeted,
+                    onDrop: onDrop
+                )
+            )
+        }
+        .tint(.secondary)
     }
 }
 

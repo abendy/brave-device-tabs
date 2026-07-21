@@ -92,9 +92,33 @@ export async function syncTabGroupsToServer(): Promise<void> {
       return;
     }
 
-    const groups = (await chrome.tabGroups.query({})).flatMap((group) => {
+    const [liveGroups, tabs] = await Promise.all([
+      chrome.tabGroups.query({}),
+      chrome.tabs.query({}),
+    ]);
+    const firstTabIndexByGroup = new Map<number, number>();
+    for (const tab of tabs) {
+      if (tab.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE) {
+        continue;
+      }
+      const currentIndex = firstTabIndexByGroup.get(tab.groupId);
+      if (currentIndex === undefined || tab.index < currentIndex) {
+        firstTabIndexByGroup.set(tab.groupId, tab.index);
+      }
+    }
+
+    const groups = liveGroups.flatMap((group) => {
       const title = group.title?.trim();
-      return title ? [{ color: group.color, title }] : [];
+      return title
+        ? [
+            {
+              color: group.color,
+              index: firstTabIndexByGroup.get(group.id) ?? 0,
+              title,
+              windowId: group.windowId,
+            },
+          ]
+        : [];
     });
     await writeTabGroups(serverUrl, token, groups);
   } catch (error) {
@@ -105,7 +129,12 @@ export async function syncTabGroupsToServer(): Promise<void> {
 async function writeTabGroups(
   serverUrl: string,
   token: string,
-  groups: Array<{ color: chrome.tabGroups.TabGroup["color"]; title: string }>,
+  groups: Array<{
+    color: chrome.tabGroups.TabGroup["color"];
+    index: number;
+    title: string;
+    windowId: number;
+  }>,
 ): Promise<void> {
   const collectionUrl = `${serverUrl}/api/collections/browser_groups/records`;
   const response = await fetch(`${collectionUrl}?perPage=1`, {
