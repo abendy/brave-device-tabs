@@ -27,8 +27,28 @@ Extension — see [Shared Links](#shared-links-optional) below.
 2. Open `brave://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked**.
-5. Select the unzipped `brave-device-tabs` folder.
+5. Select the unzipped folder containing `manifest.json`.
 6. Pin **Device Tabs Picker** to the toolbar.
+
+## Develop the extension
+
+The popup and options page are React and TypeScript applications built with
+Vite. Development requires Node.js 22 or newer and pnpm 10.33.
+
+```sh
+pnpm install
+pnpm verify
+```
+
+`pnpm build` creates the unpacked extension in `dist/`. In
+`brave://extensions`, load that `dist/` directory rather than the repository
+root. Run `pnpm dev:extension` to rebuild `dist/` while editing, then reload
+the extension from Brave's extensions page.
+
+For ordinary browser-based UI work, `pnpm dev` serves a popup preview with
+sample devices at `http://127.0.0.1:5173/popup.html`. This preview does not
+exercise Brave's extension APIs; the Vitest suite covers those boundaries with
+controlled mocks.
 
 ## Required Brave Sync setting
 
@@ -80,11 +100,14 @@ Browser-internal pages such as new-tab, settings, and other non-transferable URL
 ## Files
 
 - `manifest.json` — Manifest V3 configuration
-- `popup.html` / `popup.css` / `popup.js` — popup markup, styling, and
-  sync-session loading, filtering, selection, and opening logic
-- `options.html` / `options.css` / `options.js` — Shared Links server setup
-- `storage-keys.js` — `chrome.storage.local` key names shared by popup and options
+- `popup.html` / `popup.css` — Vite popup entry and Aqua styling
+- `src/popup/` — React components, state controller, domain logic, and browser services
+- `options.html` / `options.css` / `src/options/` — React-based Shared Links server setup
+- `src/shared/` — storage keys shared by the popup and options page
+- `tests/` — Vitest domain, UI, and browser-boundary tests
+- `package.json`, `vite.config.ts`, `biome.json`, and `oxlintrc.json` — development toolchain
 - `icons/` — extension icons
+- `dist/` — generated unpacked extension (ignored by Git)
 - `server/` — PocketBase backend for Shared Links (Fly.io deploy config)
 - `ios/` — iOS container app + Share Extension for Shared Links
 - `SETUP.md` — deployment and device setup for Shared Links

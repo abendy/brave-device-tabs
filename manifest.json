@@ -4,16 +4,8 @@
   "description": "Select and open synced tabs from your other Brave devices.",
   "version": "1.0.1",
   "minimum_chrome_version": "88",
-  "permissions": [
-    "sessions",
-    "tabs",
-    "tabGroups",
-    "storage",
-    "permissions"
-  ],
-  "optional_host_permissions": [
-    "https://*/*"
-  ],
+  "permissions": ["sessions", "tabs", "tabGroups", "storage", "permissions"],
+  "optional_host_permissions": ["https://*/*"],
   "options_page": "options.html",
   "action": {
     "default_title": "Device Tabs Picker",

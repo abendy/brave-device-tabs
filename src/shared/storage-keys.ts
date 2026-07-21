@@ -1,6 +1,4 @@
-"use strict";
-
-const STORAGE_KEYS = {
+export const STORAGE_KEYS = {
   serverUrl: "pocketbaseServerUrl",
   token: "pocketbaseToken",
-};
+} as const;

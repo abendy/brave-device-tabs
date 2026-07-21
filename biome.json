@@ -1,0 +1,57 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.9/schema.json",
+  "files": {
+    "includes": [
+      "**",
+      "!**/coverage",
+      "!**/dist",
+      "!**/node_modules",
+      "!.agents",
+      "!.claude",
+      "!.codex",
+      "!ios",
+      "!server"
+    ]
+  },
+  "formatter": {
+    "indentStyle": "space",
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "complexity": {
+        "noForEach": "error"
+      },
+      "performance": {
+        "useTopLevelRegex": "error"
+      },
+      "style": {
+        "noNegationElse": "error",
+        "noNonNullAssertion": "error",
+        "useBlockStatements": "error",
+        "useConst": "error",
+        "useTemplate": "error"
+      },
+      "suspicious": {
+        "noExplicitAny": "error"
+      },
+      "nursery": {
+        "useRegexpExec": "error"
+      }
+    }
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  }
+}

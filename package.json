@@ -1,0 +1,44 @@
+{
+  "name": "brave-device-tabs",
+  "version": "1.0.1",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "dev:extension": "vite build --watch",
+    "build": "vite build",
+    "format": "biome format --write .",
+    "lint": "pnpm lint:biome && pnpm lint:oxlint",
+    "lint:biome": "biome check .",
+    "lint:fix": "biome check --write . && oxlint --fix src tests vite.config.ts vitest.config.ts",
+    "lint:oxlint": "oxlint --deny-warnings src tests vite.config.ts vitest.config.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.9",
+    "@types/chrome": "^0.2.2",
+    "@types/jsdom": "^28.0.1",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "husky": "^9.1.7",
+    "jsdom": "^29.1.1",
+    "oxlint": "^1.74.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
+  }
+}
