@@ -56,16 +56,16 @@ async function refreshAll() {
   // Each loader swallows its own errors and resolves to a safe fallback, so
   // one failing (e.g. no Shared Links server configured) never blocks the
   // other from rendering.
-  const [syncedDevices, sharedDevice, openedHistory] = await Promise.all([
+  const [syncedDevices, sharedDevices, openedHistory] = await Promise.all([
     loadSyncedDevices(),
-    loadSharedLinksDevice(),
+    loadSharedLinksDevices(),
     loadOpenedHistory(),
   ]);
 
   state.openedHistory = openedHistory;
   const openedIds = getOpenedIdSet(openedHistory);
   const filteredSynced = filterOpenedTabs(syncedDevices, openedIds);
-  const filteredShared = sharedDevice ? filterOpenedTabs([sharedDevice], openedIds) : [];
+  const filteredShared = filterOpenedTabs(sharedDevices, openedIds);
 
   state.devices = [...filteredShared, ...filteredSynced];
   removeStaleSelections();
@@ -73,6 +73,44 @@ async function refreshAll() {
   render();
 
   if (state.activeTab === "opened") renderOpenedView();
+
+  // Fire-and-forget: pushing the current tab-group list must never block
+  // rendering the tab list, which is the extension's core feature.
+  syncTabGroupsToServer();
+}
+
+async function syncTabGroupsToServer() {
+  try {
+    const { [STORAGE_KEYS.serverUrl]: serverUrl, [STORAGE_KEYS.token]: token } = await chrome.storage.local.get([
+      STORAGE_KEYS.serverUrl,
+      STORAGE_KEYS.token,
+    ]);
+    if (!serverUrl || !token || !chrome.tabGroups?.query) return;
+
+    const rawGroups = await chrome.tabGroups.query({});
+    const groups = rawGroups
+      .filter((group) => group.title?.trim())
+      .map((group) => ({ title: group.title.trim(), color: group.color }));
+
+    const existing = await fetch(`${serverUrl}/api/collections/browser_groups/records?perPage=1`, {
+      headers: { Authorization: token },
+    }).then((response) => (response.ok ? response.json() : { items: [] }));
+
+    const record = existing.items?.[0];
+    const url = record
+      ? `${serverUrl}/api/collections/browser_groups/records/${record.id}`
+      : `${serverUrl}/api/collections/browser_groups/records`;
+
+    await fetch(url, {
+      method: record ? "PATCH" : "POST",
+      headers: { Authorization: token, "Content-Type": "application/json" },
+      body: JSON.stringify({ groups }),
+    });
+  } catch (error) {
+    // Silent by design, same reasoning as loadSharedLinksDevices: a sync
+    // hiccup here must never surface as a problem with the tab list itself.
+    console.warn("Unable to sync tab groups:", error);
+  }
 }
 
 function filterOpenedTabs(devices, openedIds) {
@@ -99,14 +137,14 @@ async function loadSyncedDevices() {
   }
 }
 
-async function loadSharedLinksDevice() {
+async function loadSharedLinksDevices() {
   try {
     const { [STORAGE_KEYS.serverUrl]: serverUrl, [STORAGE_KEYS.token]: token } = await chrome.storage.local.get([
       STORAGE_KEYS.serverUrl,
       STORAGE_KEYS.token,
     ]);
 
-    if (!serverUrl || !token) return null;
+    if (!serverUrl || !token) return [];
 
     const query = `filter=${encodeURIComponent("(opened=false)")}&sort=-created`;
     const response = await fetch(`${serverUrl}/api/collections/shared_links/records?${query}`, {
@@ -122,15 +160,36 @@ async function loadSharedLinksDevice() {
       .map(normalizeSharedLink)
       .filter((tab) => tab.url && isOpenableUrl(tab.url));
 
-    if (tabs.length === 0) return null;
-
-    return { id: "shared-links", name: "Shared Links", tabs };
+    return groupSharedLinksByDestination(tabs);
   } catch (error) {
     // Silent by design: an unconfigured or unreachable server must not
     // block the synced-tabs list, which is the extension's core feature.
     console.warn("Unable to load shared links:", error);
-    return null;
+    return [];
   }
+}
+
+function groupSharedLinksByDestination(tabs) {
+  const groups = new Map();
+
+  for (const tab of tabs) {
+    const key = tab.destination || "";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(tab);
+  }
+
+  // Undirected links ("" key) first since that's the common case, named
+  // destinations after in alphabetical order.
+  const destinations = [...groups.keys()].sort((a, b) => {
+    if (a === "" || b === "") return a === b ? 0 : a === "" ? -1 : 1;
+    return a.localeCompare(b);
+  });
+
+  return destinations.map((destination) => ({
+    id: `shared-links:${destination ? slug(destination) : "none"}`,
+    name: destination || "Shared Links",
+    tabs: groups.get(destination),
+  }));
 }
 
 function normalizeSharedLink(record) {
@@ -142,6 +201,7 @@ function normalizeSharedLink(record) {
     title,
     url: record.url,
     source,
+    destination: record.destination?.trim() || null,
     searchable: `shared links ${source} ${title} ${record.url}`.toLocaleLowerCase(),
   };
 }
@@ -285,7 +345,7 @@ function renderDevice(device) {
     url.textContent = tab.url;
     url.title = tab.url;
 
-    if (device.id === "shared-links") {
+    if (device.id.startsWith("shared-links:")) {
       deleteButton.hidden = false;
       deleteButton.addEventListener("click", (event) => {
         event.preventDefault();
@@ -540,6 +600,18 @@ function getAllTabs() {
   return state.devices.flatMap((device) => device.tabs);
 }
 
+function resolveTabDestination(tab, defaultWindowId, liveGroups) {
+  if (!tab.destination) return { windowId: defaultWindowId, groupId: null };
+
+  const target = tab.destination.trim().toLocaleLowerCase();
+  const match = liveGroups.find((group) => group.title?.trim().toLocaleLowerCase() === target);
+
+  // No match (browser closed, group renamed/closed since the last sync, or no
+  // destination was ever set) falls back to exactly today's behavior: a
+  // plain tab in the popup's current window.
+  return match ? { windowId: match.windowId, groupId: match.id } : { windowId: defaultWindowId, groupId: null };
+}
+
 async function openTabs(tabs, triggerButton) {
   if (tabs.length === 0) return;
 
@@ -550,6 +622,10 @@ async function openTabs(tabs, triggerButton) {
 
   try {
     const windowId = await getCurrentWindowId();
+    // One fresh snapshot for this whole batch - accuracy matters most right
+    // at the moment we're placing tabs, but re-querying per tab would be
+    // wasteful for links opened together in the same action.
+    const liveGroups = chrome.tabGroups?.query ? await chrome.tabGroups.query({}) : [];
 
     // Open every tab backgrounded first. Activating a tab mid-loop would
     // shift focus away from this popup, and Chrome/Brave close extension
@@ -557,13 +633,25 @@ async function openTabs(tabs, triggerButton) {
     // leaving later tabs unopened. Activate the first tab only once
     // everything has been created.
     let firstTabId;
+    let firstTabWindowId;
     for (let index = 0; index < tabs.length; index += 1) {
+      const tab = tabs[index];
+      const destination = resolveTabDestination(tab, windowId, liveGroups);
+
       const created = await chrome.tabs.create({
-        windowId,
-        url: tabs[index].url,
+        windowId: destination.windowId,
+        url: tab.url,
         active: false,
       });
-      if (index === 0) firstTabId = created.id;
+
+      if (destination.groupId !== null) {
+        await chrome.tabs.group({ tabIds: [created.id], groupId: destination.groupId });
+      }
+
+      if (index === 0) {
+        firstTabId = created.id;
+        firstTabWindowId = destination.windowId;
+      }
     }
 
     // Bookkeeping happens before activating the new tab, not after. Activating
@@ -575,6 +663,12 @@ async function openTabs(tabs, triggerButton) {
     await recordOpenedBatch(tabs);
 
     if (firstTabId !== undefined) {
+      // A matched tab can land in a different window than the popup's own -
+      // making it the active tab within that window isn't enough to bring
+      // the window itself to the front.
+      if (firstTabWindowId !== windowId) {
+        await chrome.windows.update(firstTabWindowId, { focused: true });
+      }
       await chrome.tabs.update(firstTabId, { active: true });
     }
 

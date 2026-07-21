@@ -9,7 +9,10 @@
 ios/*.xcodeproj/
 ios/DerivedData/
 ios/build/
+ios/build-device/
+ios/build-simulator/
 ios/Local.xcconfig
+ios/Shared/DeploymentMarker.swift
 
 # PocketBase local data (never commit real data/tokens)
 server/pb_data/

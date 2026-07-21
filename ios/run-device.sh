@@ -35,15 +35,24 @@ if [[ -z "$DEVICE_ID" ]]; then
 fi
 echo "Using device: $DEVICE_ID"
 
+./generate-deployment-marker.sh
 xcodegen generate
 
+# Separate derived-data dir from run-simulator.sh's - sharing one meant a
+# stale Debug-iphonesimulator product could sit next to a fresh
+# Debug-iphoneos one, and `find | head -1` would pick either unpredictably.
+# That silently tried to install a simulator binary onto a real device once.
 xcodebuild build \
   -project DeviceTabsShare.xcodeproj \
   -scheme DeviceTabsShare \
   -destination "platform=iOS,id=$DEVICE_ID" \
-  -derivedDataPath build
+  -derivedDataPath build-device
 
-APP_PATH=$(find build/Build/Products -maxdepth 2 -name "DeviceTabsShare.app" | head -1)
+APP_PATH=$(find build-device/Build/Products/Debug-iphoneos -maxdepth 1 -name "DeviceTabsShare.app" | head -1)
+if [[ -z "$APP_PATH" ]]; then
+  echo "Build succeeded but no Debug-iphoneos app product was found." >&2
+  exit 1
+fi
 BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_PATH/Info.plist")
 
 xcrun devicectl device install app --device "$DEVICE_ID" "$APP_PATH"

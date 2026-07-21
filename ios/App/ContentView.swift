@@ -55,6 +55,12 @@ struct ContentView: View {
                             .foregroundStyle(statusIsError ? .red : .secondary)
                     }
                 }
+
+                Section {
+                    Text("\(DeploymentMarker.word) deployment")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
             }
             .navigationTitle("Device Tabs Share")
         }

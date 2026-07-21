@@ -51,7 +51,11 @@ shared from an iPhone can't join the sync chain this extension reads. Instead,
 an iOS Share Extension (`ios/`) posts shared URLs to a small self-hosted
 [PocketBase](https://pocketbase.io) instance (`server/`), and this extension
 polls that same instance and merges unopened links in as a "Shared Links"
-device alongside your real synced devices.
+device alongside your real synced devices. At share time on iOS you can also
+pick a destination tab group (synced from the popup's own current
+`chrome.tabGroups` state) so the link opens straight into the right window and
+group instead of as a plain tab — with "no group" always available as a
+fallback.
 
 This is off by default — nothing changes until you configure a server via the
 popup's gear icon. Full setup (deploying the server, signing the iOS app,

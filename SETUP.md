@@ -28,9 +28,10 @@ fly deploy
 the iOS share sheet and the browser popup get fast responses — no cold start.
 
 PocketBase applies any new files in `server/pb_migrations/` automatically on
-startup, so picking up schema changes (like the delete-permission migration
-that enables the popup's discard button) is just `fly deploy` again from
-`server/` — no separate migration step.
+startup, so picking up schema changes (the discard-button permission, the
+`shared_links.destination` field, the `browser_groups` collection used for
+routing shares into tab groups) is just `fly deploy` again from `server/` —
+no separate migration step.
 
 ## 2. Create your PocketBase accounts
 
@@ -140,6 +141,13 @@ setup.
 From Safari (or any app with a share sheet), tap **Share** → **Save to
    Device Tabs**. The share extension reads the same signed-in session via
    the shared App Group, so no separate sign-in is needed there.
+
+   Tap the **Destination** menu to pick from your current tab group names
+   ("No group" plus each group Brave last reported) before posting. It only
+   knows about groups from the last time the popup was open on desktop — not
+   a live feed — so if you just created a group, open the popup once before
+   sharing to it. A destination that doesn't match anything
+   currently open falls back to a plain ungrouped tab in the current window.
 
 ## 4. Browser extension: point it at your server
 

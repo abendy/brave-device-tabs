@@ -31,7 +31,7 @@ enum PocketBaseClient {
         return try JSONDecoder().decode(AuthResponse.self, from: data).token
     }
 
-    static func shareLink(url: String, title: String?, source: String) async throws {
+    static func shareLink(url: String, title: String?, source: String, destination: String?) async throws {
         guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
             throw PocketBaseError.notConfigured
         }
@@ -43,12 +43,41 @@ enum PocketBaseClient {
 
         var body: [String: String] = ["url": url, "source": source]
         if let title, !title.isEmpty { body["title"] = title }
+        if let destination, !destination.isEmpty { body["destination"] = destination }
         request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw PocketBaseError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
             throw PocketBaseError.server(errorMessage(from: data) ?? "Could not save the link (\(http.statusCode)).")
+        }
+    }
+
+    /// Best-effort: an empty list just means the cycling picker only offers
+    /// "No group" - a fetch failure here must never block sharing.
+    static func fetchGroupTitles(serverURL: URL, token: String) async -> [String] {
+        guard var components = URLComponents(
+            url: serverURL.appendingPathComponent("api/collections/browser_groups/records"),
+            resolvingAgainstBaseURL: false
+        ) else { return [] }
+        components.queryItems = [URLQueryItem(name: "perPage", value: "1")]
+        guard let url = components.url else { return [] }
+
+        var request = URLRequest(url: url)
+        request.setValue(token, forHTTPHeaderField: "Authorization")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return [] }
+
+            struct Group: Decodable { let title: String }
+            struct Record: Decodable { let groups: [Group] }
+            struct ListResponse: Decodable { let items: [Record] }
+
+            let list = try JSONDecoder().decode(ListResponse.self, from: data)
+            return list.items.first?.groups.map(\.title) ?? []
+        } catch {
+            return []
         }
     }
 
