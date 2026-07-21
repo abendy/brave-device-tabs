@@ -56,6 +56,7 @@ export function App({ closePopup = closeBrowserPopup, services = popupServices }
           onToggleDevice={controller.toggleDevice}
           onToggleTab={controller.toggleTab}
           onToggleVisible={controller.toggleVisibleSelection}
+          openedTabIds={controller.openedTabIds}
           panelId={`${controller.activeView}-view`}
           panelLabelledBy={`${controller.activeView}-view-button`}
           selected={controller.selected}

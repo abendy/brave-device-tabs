@@ -22,6 +22,7 @@ interface PopupController {
   openSelected(): Promise<void>;
   openingMode: OpeningMode;
   refresh(): Promise<void>;
+  openedTabIds: ReadonlySet<string>;
   selected: ReadonlySet<string>;
   selectedCount: number;
   setActiveView(view: ActiveView): void;
@@ -51,6 +52,7 @@ export function usePopupController(
   const [status, setStatus] = useState<StatusMessage | null>(null);
   const refreshing = useRef(false);
   const normalizedFilter = useMemo(() => filter.trim().toLocaleLowerCase(), [filter]);
+  const openedTabIds = useMemo(() => getOpenedIdSet(history), [history]);
 
   const viewDevices = activeView === "devices" ? deviceDevices : linkDevices;
   const totalTabs = viewDevices.reduce((sum, device) => sum + device.tabs.length, 0);
@@ -85,7 +87,7 @@ export function usePopupController(
       ]);
       const openedIds = getOpenedIdSet(openedHistory);
       const nextLinkDevices = filterOpenedTabs(sharedDevices, openedIds);
-      const nextDeviceDevices = filterOpenedTabs(syncedResult.devices, openedIds);
+      const nextDeviceDevices = syncedResult.devices;
 
       setHistory(openedHistory);
       setLinkDevices(nextLinkDevices);
@@ -200,6 +202,7 @@ export function usePopupController(
     loading,
     openAll,
     openSelected,
+    openedTabIds,
     openingMode,
     refresh,
     selected,

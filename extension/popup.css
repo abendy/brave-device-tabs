@@ -766,6 +766,18 @@ input:focus-visible + .custom-checkbox {
   display: none;
 }
 
+.tab-opened-badge {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(90, 120, 150, 0.15);
+  color: var(--ink-soft);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
 /* ---------- empty state ---------- */
 
 .empty {

@@ -19,6 +19,7 @@ interface TabsViewProps {
   onToggleDevice(deviceId: string, checked: boolean): void;
   onToggleTab(tabId: string, checked: boolean): void;
   onToggleVisible(): void;
+  openedTabIds: ReadonlySet<string>;
   panelId: string;
   panelLabelledBy: string;
   selected: ReadonlySet<string>;
@@ -70,6 +71,7 @@ export function TabsView(props: TabsViewProps) {
         onDelete={props.onDelete}
         onToggleDevice={props.onToggleDevice}
         onToggleTab={props.onToggleTab}
+        openedTabIds={props.openedTabIds}
         selected={props.selected}
         visibleDevices={props.visibleDevices}
       />

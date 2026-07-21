@@ -13,6 +13,7 @@ interface DeviceListProps {
   onDelete(tabId: string): void;
   onToggleDevice(deviceId: string, checked: boolean): void;
   onToggleTab(tabId: string, checked: boolean): void;
+  openedTabIds: ReadonlySet<string>;
   selected: ReadonlySet<string>;
   visibleDevices: VisibleDevice[];
 }
@@ -53,6 +54,7 @@ function DeviceSection({
   onDelete,
   onToggleDevice,
   onToggleTab,
+  openedTabIds,
   selected,
 }: DeviceSectionProps) {
   const { device, tabs } = entry;
@@ -95,6 +97,7 @@ function DeviceSection({
             key={tab.id}
             onDelete={onDelete}
             onToggle={onToggleTab}
+            opened={openedTabIds.has(tab.id)}
             tab={tab}
           />
         ))}
@@ -107,10 +110,11 @@ interface TabRowProps {
   checked: boolean;
   onDelete(tabId: string): void;
   onToggle(tabId: string, checked: boolean): void;
+  opened: boolean;
   tab: DeviceTab;
 }
 
-function TabRow({ checked, onDelete, onToggle, tab }: TabRowProps) {
+function TabRow({ checked, onDelete, onToggle, opened, tab }: TabRowProps) {
   return (
     <div className="tab-row">
       <label className="tab-row-main">
@@ -129,6 +133,7 @@ function TabRow({ checked, onDelete, onToggle, tab }: TabRowProps) {
           </span>
         </span>
       </label>
+      {opened ? <span className="tab-opened-badge">Opened</span> : null}
       {tab.id.startsWith("shared:") ? (
         <button
           aria-label={`Discard ${tab.title}`}

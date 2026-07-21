@@ -35,6 +35,26 @@ describe("App", () => {
     expect(container.textContent).toContain("Alpha article");
   });
 
+  it("keeps a synced device tab visible after opening it, labeled Opened", async () => {
+    const alpha = tab("alpha", "Alpha article");
+    const services = servicesWith([device(alpha)]);
+    services.loadOpenedHistory = async () => [
+      {
+        id: "batch",
+        items: [
+          { id: "alpha", source: "Phone", title: "Alpha article", url: "https://alpha.test" },
+        ],
+        openedAt: new Date().toISOString(),
+      },
+    ];
+
+    await renderApp(root, services, vi.fn());
+    await clickButton(container, "Devices");
+
+    expect(container.textContent).toContain("Alpha article");
+    expect(container.querySelector(".tab-opened-badge")?.textContent).toBe("Opened");
+  });
+
   it("filters, selects visible tabs, and opens only the selection", async () => {
     const alpha = tab("alpha", "Alpha article");
     const beta = tab("beta", "Beta article");
