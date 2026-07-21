@@ -25,6 +25,16 @@ describe("App", () => {
     container.remove();
   });
 
+  it("defaults to the Links view and hides synced device tabs until switching", async () => {
+    await renderApp(root, servicesWith([device(tab("alpha", "Alpha article"))]), vi.fn());
+
+    expect(container.textContent).toContain("No shared links yet");
+    expect(container.textContent).not.toContain("Alpha article");
+
+    await clickButton(container, "Devices");
+    expect(container.textContent).toContain("Alpha article");
+  });
+
   it("filters, selects visible tabs, and opens only the selection", async () => {
     const alpha = tab("alpha", "Alpha article");
     const beta = tab("beta", "Beta article");
@@ -32,6 +42,7 @@ describe("App", () => {
     const closePopup = vi.fn();
 
     await renderApp(root, servicesWith([device(alpha, beta)], openTabs), closePopup);
+    await clickButton(container, "Devices");
     expect(container.textContent).toContain("1 device · 2 tabs");
 
     const search = requiredElement<HTMLInputElement>(container, "input[type='search']");
@@ -87,7 +98,7 @@ describe("App", () => {
 
     expect(discard).toHaveBeenCalledWith("shared:discard");
     expect(container.textContent).not.toContain("Shared article");
-    expect(container.textContent).toContain("No synced device tabs found");
+    expect(container.textContent).toContain("No shared links yet");
   });
 });
 

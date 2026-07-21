@@ -13,9 +13,26 @@ interface AppProps {
 
 const closeBrowserPopup = () => window.close();
 
+const VIEW_COPY = {
+  devices: {
+    emptyCopy:
+      "In Brave Sync, enable Open Tabs on your iPhone and Mac, open a few pages on the iPhone, then refresh.",
+    emptyTitle: "No synced device tabs found",
+    filterPlaceholder: "Filter by title, URL, or device",
+    groupNoun: "device",
+    loadingCopy: "Loading synced tabs…",
+  },
+  links: {
+    emptyCopy: "Share a link to a tab group from your phone to see it here.",
+    emptyTitle: "No shared links yet",
+    filterPlaceholder: "Filter by title, URL, or tab group",
+    groupNoun: "group",
+    loadingCopy: "Loading shared links…",
+  },
+} as const;
+
 export function App({ closePopup = closeBrowserPopup, services = popupServices }: AppProps) {
   const controller = usePopupController(services, closePopup);
-  const totalTabs = controller.devices.reduce((sum, device) => sum + device.tabs.length, 0);
   const busy = controller.loading || controller.openingMode !== null;
 
   return (
@@ -26,10 +43,12 @@ export function App({ closePopup = closeBrowserPopup, services = popupServices }
         onRefresh={() => void controller.refresh()}
       />
       <ViewSwitcher activeView={controller.activeView} onChange={controller.setActiveView} />
-      {controller.activeView === "tabs" ? (
+      {controller.activeView === "opened" ? (
+        <OpenedView history={controller.history} />
+      ) : (
         <TabsView
           allVisibleSelected={controller.allVisibleSelected}
-          devices={controller.devices}
+          devices={controller.viewDevices}
           filter={controller.filter}
           loading={controller.loading}
           onDelete={(tabId) => void controller.deleteTab(tabId)}
@@ -37,24 +56,25 @@ export function App({ closePopup = closeBrowserPopup, services = popupServices }
           onToggleDevice={controller.toggleDevice}
           onToggleTab={controller.toggleTab}
           onToggleVisible={controller.toggleVisibleSelection}
+          panelId={`${controller.activeView}-view`}
+          panelLabelledBy={`${controller.activeView}-view-button`}
           selected={controller.selected}
           status={controller.status}
           visibleDevices={controller.visibleDevices}
           visibleTabCount={controller.visibleTabIds.length}
+          {...VIEW_COPY[controller.activeView]}
         />
-      ) : (
-        <OpenedView history={controller.history} />
       )}
-      {controller.activeView === "tabs" ? (
+      {controller.activeView === "opened" ? null : (
         <Footer
           loading={controller.loading}
           onOpenAll={() => void controller.openAll()}
           onOpenSelected={() => void controller.openSelected()}
           openingMode={controller.openingMode}
-          selectedCount={controller.selected.size}
-          totalTabs={totalTabs}
+          selectedCount={controller.selectedCount}
+          totalTabs={controller.totalTabs}
         />
-      ) : null}
+      )}
     </main>
   );
 }

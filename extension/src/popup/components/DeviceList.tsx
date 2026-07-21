@@ -6,6 +6,8 @@ import { TrashIcon } from "./Icons";
 
 interface DeviceListProps {
   devicesExist: boolean;
+  emptyCopy: string;
+  emptyTitle: string;
   filtered: boolean;
   loading: boolean;
   onDelete(tabId: string): void;
@@ -16,14 +18,11 @@ interface DeviceListProps {
 }
 
 export function DeviceList(props: DeviceListProps) {
-  const { devicesExist, filtered, loading, visibleDevices } = props;
+  const { devicesExist, emptyCopy, emptyTitle, filtered, loading, visibleDevices } = props;
   if (!loading && !devicesExist) {
     return (
       <div aria-live="polite" className="device-list">
-        <EmptyState
-          copy="In Brave Sync, enable Open Tabs on your iPhone and Mac, open a few pages on the iPhone, then refresh."
-          title="No synced device tabs found"
-        />
+        <EmptyState copy={emptyCopy} title={emptyTitle} />
       </div>
     );
   }

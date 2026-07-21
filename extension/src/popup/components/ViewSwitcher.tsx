@@ -5,31 +5,29 @@ interface ViewSwitcherProps {
   onChange(view: ActiveView): void;
 }
 
+const TABS: Array<{ id: ActiveView; label: string }> = [
+  { id: "links", label: "Links" },
+  { id: "devices", label: "Devices" },
+  { id: "opened", label: "Opened" },
+];
+
 export function ViewSwitcher({ activeView, onChange }: ViewSwitcherProps) {
   return (
     <div aria-label="View" className="view-switcher" role="tablist">
-      <button
-        aria-controls="tabs-view"
-        aria-selected={activeView === "tabs"}
-        className={`view-tab${activeView === "tabs" ? " is-active" : ""}`}
-        id="tabs-view-button"
-        onClick={() => onChange("tabs")}
-        role="tab"
-        type="button"
-      >
-        Tabs
-      </button>
-      <button
-        aria-controls="opened-view"
-        aria-selected={activeView === "opened"}
-        className={`view-tab${activeView === "opened" ? " is-active" : ""}`}
-        id="opened-view-button"
-        onClick={() => onChange("opened")}
-        role="tab"
-        type="button"
-      >
-        Opened
-      </button>
+      {TABS.map(({ id, label }) => (
+        <button
+          aria-controls={`${id}-view`}
+          aria-selected={activeView === id}
+          className={`view-tab${activeView === id ? " is-active" : ""}`}
+          id={`${id}-view-button`}
+          key={id}
+          onClick={() => onChange(id)}
+          role="tab"
+          type="button"
+        >
+          {label}
+        </button>
+      ))}
     </div>
   );
 }

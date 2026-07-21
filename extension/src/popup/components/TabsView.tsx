@@ -7,13 +7,20 @@ import { Status } from "./Status";
 interface TabsViewProps {
   allVisibleSelected: boolean;
   devices: Device[];
+  emptyCopy: string;
+  emptyTitle: string;
   filter: string;
+  filterPlaceholder: string;
+  groupNoun: string;
   loading: boolean;
+  loadingCopy: string;
   onDelete(tabId: string): void;
   onFilter(value: string): void;
   onToggleDevice(deviceId: string, checked: boolean): void;
   onToggleTab(tabId: string, checked: boolean): void;
   onToggleVisible(): void;
+  panelId: string;
+  panelLabelledBy: string;
   selected: ReadonlySet<string>;
   status: StatusMessage | null;
   visibleDevices: VisibleDevice[];
@@ -23,11 +30,11 @@ interface TabsViewProps {
 export function TabsView(props: TabsViewProps) {
   const totalTabs = props.devices.reduce((sum, device) => sum + device.tabs.length, 0);
   const summary = props.loading
-    ? "Loading synced tabs…"
-    : `${props.devices.length} ${pluralize(props.devices.length, "device")} · ${totalTabs} ${pluralize(totalTabs, "tab")}`;
+    ? props.loadingCopy
+    : `${props.devices.length} ${pluralize(props.devices.length, props.groupNoun)} · ${totalTabs} ${pluralize(totalTabs, "tab")}`;
 
   return (
-    <div aria-labelledby="tabs-view-button" id="tabs-view" role="tabpanel">
+    <div aria-labelledby={props.panelLabelledBy} id={props.panelId} role="tabpanel">
       <p aria-live="polite" className="summary">
         {summary}
       </p>
@@ -39,7 +46,7 @@ export function TabsView(props: TabsViewProps) {
             autoComplete="off"
             disabled={props.loading}
             onChange={(event) => props.onFilter(event.currentTarget.value)}
-            placeholder="Filter by title, URL, or device"
+            placeholder={props.filterPlaceholder}
             type="search"
             value={props.filter}
           />
@@ -56,6 +63,8 @@ export function TabsView(props: TabsViewProps) {
       <Status message={props.status} />
       <DeviceList
         devicesExist={props.devices.length > 0}
+        emptyCopy={props.emptyCopy}
+        emptyTitle={props.emptyTitle}
         filtered={Boolean(props.filter.trim())}
         loading={props.loading}
         onDelete={props.onDelete}

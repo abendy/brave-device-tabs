@@ -15,7 +15,6 @@ interface PopupController {
   activeView: ActiveView;
   allVisibleSelected: boolean;
   deleteTab(tabId: string): Promise<void>;
-  devices: Device[];
   filter: string;
   history: OpenedBatch[];
   loading: boolean;
@@ -24,12 +23,15 @@ interface PopupController {
   openingMode: OpeningMode;
   refresh(): Promise<void>;
   selected: ReadonlySet<string>;
+  selectedCount: number;
   setActiveView(view: ActiveView): void;
   setFilter(value: string): void;
   status: StatusMessage | null;
   toggleDevice(deviceId: string, checked: boolean): void;
   toggleTab(tabId: string, checked: boolean): void;
   toggleVisibleSelection(): void;
+  totalTabs: number;
+  viewDevices: Device[];
   visibleDevices: VisibleDevice[];
   visibleTabIds: string[];
 }
@@ -38,8 +40,9 @@ export function usePopupController(
   services: PopupServices,
   closePopup: () => void,
 ): PopupController {
-  const [activeView, setActiveView] = useState<ActiveView>("tabs");
-  const [devices, setDevices] = useState<Device[]>([]);
+  const [activeView, setActiveView] = useState<ActiveView>("links");
+  const [linkDevices, setLinkDevices] = useState<Device[]>([]);
+  const [deviceDevices, setDeviceDevices] = useState<Device[]>([]);
   const [filter, setFilterValue] = useState("");
   const [history, setHistory] = useState<OpenedBatch[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,9 +52,12 @@ export function usePopupController(
   const refreshing = useRef(false);
   const normalizedFilter = useMemo(() => filter.trim().toLocaleLowerCase(), [filter]);
 
+  const viewDevices = activeView === "devices" ? deviceDevices : linkDevices;
+  const totalTabs = viewDevices.reduce((sum, device) => sum + device.tabs.length, 0);
+
   const visibleDevices = useMemo(
-    () => getVisibleDevices(devices, normalizedFilter),
-    [devices, normalizedFilter],
+    () => getVisibleDevices(viewDevices, normalizedFilter),
+    [viewDevices, normalizedFilter],
   );
   const visibleTabIds = useMemo(
     () => visibleDevices.flatMap((entry) => entry.tabs.map((tab) => tab.id)),
@@ -59,6 +65,9 @@ export function usePopupController(
   );
   const allVisibleSelected =
     visibleTabIds.length > 0 && visibleTabIds.every((id) => selected.has(id));
+  const selectedCount = viewDevices
+    .flatMap((device) => device.tabs)
+    .filter((tab) => selected.has(tab.id)).length;
 
   const refresh = useCallback(async () => {
     if (refreshing.current) {
@@ -75,14 +84,15 @@ export function usePopupController(
         services.loadOpenedHistory(),
       ]);
       const openedIds = getOpenedIdSet(openedHistory);
-      const nextDevices = [
-        ...filterOpenedTabs(sharedDevices, openedIds),
-        ...filterOpenedTabs(syncedResult.devices, openedIds),
-      ];
+      const nextLinkDevices = filterOpenedTabs(sharedDevices, openedIds);
+      const nextDeviceDevices = filterOpenedTabs(syncedResult.devices, openedIds);
 
       setHistory(openedHistory);
-      setDevices(nextDevices);
-      setSelected((current) => removeStaleSelections(current, nextDevices));
+      setLinkDevices(nextLinkDevices);
+      setDeviceDevices(nextDeviceDevices);
+      setSelected((current) =>
+        removeStaleSelections(current, [...nextLinkDevices, ...nextDeviceDevices]),
+      );
       if (syncedResult.error) {
         setStatus({ kind: "error", text: syncedResult.error });
       }
@@ -136,7 +146,7 @@ export function usePopupController(
       setStatus(null);
       try {
         if (await services.deleteSharedLink(tabId)) {
-          setDevices((current) => removeTab(current, tabId));
+          setLinkDevices((current) => removeTab(current, tabId));
           setSelected((current) => updateSelection(current, [tabId], false));
         }
       } catch (error) {
@@ -170,22 +180,21 @@ export function usePopupController(
     [closePopup, services],
   );
 
-  const allTabs = devices.flatMap((device) => device.tabs);
-  const openAll = useCallback(() => runOpen(allTabs, "all"), [allTabs, runOpen]);
+  const viewTabs = viewDevices.flatMap((device) => device.tabs);
+  const openAll = useCallback(() => runOpen(viewTabs, "all"), [runOpen, viewTabs]);
   const openSelected = useCallback(
     () =>
       runOpen(
-        allTabs.filter((tab) => selected.has(tab.id)),
+        viewTabs.filter((tab) => selected.has(tab.id)),
         "selected",
       ),
-    [allTabs, runOpen, selected],
+    [runOpen, selected, viewTabs],
   );
 
   return {
     activeView,
     allVisibleSelected,
     deleteTab,
-    devices,
     filter,
     history,
     loading,
@@ -194,12 +203,15 @@ export function usePopupController(
     openingMode,
     refresh,
     selected,
+    selectedCount,
     setActiveView,
     setFilter,
     status,
     toggleDevice,
     toggleTab,
     toggleVisibleSelection,
+    totalTabs,
+    viewDevices,
     visibleDevices,
     visibleTabIds,
   };

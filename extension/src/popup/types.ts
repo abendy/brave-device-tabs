@@ -41,5 +41,5 @@ export interface VisibleDevice {
   tabs: DeviceTab[];
 }
 
-export type ActiveView = "opened" | "tabs";
+export type ActiveView = "devices" | "links" | "opened";
 export type OpeningMode = "all" | "selected" | null;

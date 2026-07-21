@@ -322,7 +322,7 @@ h1 em {
   height: 32px;
 }
 
-/* ---------- view switcher: Tabs / Opened ---------- */
+/* ---------- view switcher: Links / Devices / Opened ---------- */
 
 .view-switcher {
   display: flex;
@@ -349,7 +349,8 @@ h1 em {
   text-shadow: 0 -1px 1px rgba(0, 40, 80, 0.5);
 }
 
-#tabs-view,
+#links-view,
+#devices-view,
 #opened-view {
   display: flex;
   flex: 1;
@@ -357,7 +358,8 @@ h1 em {
   min-height: 0;
 }
 
-#tabs-view[hidden],
+#links-view[hidden],
+#devices-view[hidden],
 #opened-view[hidden] {
   display: none;
 }
