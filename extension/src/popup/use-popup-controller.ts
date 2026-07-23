@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getOpenedIdSet, getVisibleDevices } from "./domain";
 import type { PopupServices } from "./popup-services";
-import { OpenedTabsCleanupError } from "./tab-opener";
+import { OpenedTabsCleanupError, OpenedTabsSyncError } from "./tab-opener";
 import type {
   ActiveView,
   Device,
@@ -98,7 +98,9 @@ export function usePopupController(
       if (syncedResult.error) {
         setStatus({ kind: "error", text: syncedResult.error });
       }
-      void services.syncTabGroupsToServer();
+      void services
+        .syncTabGroupsToServer()
+        .catch((error) => console.warn("Unable to sync tab groups:", error));
     } catch (error) {
       console.error("Unable to refresh tabs:", error);
       setStatus({ kind: "error", text: "Could not refresh tabs. Try again." });
@@ -168,6 +170,13 @@ export function usePopupController(
       setStatus(null);
       try {
         await services.openTabs(tabs);
+        // Keep the popup alive until the newly created/updated group has been
+        // written. Closing first can terminate this page and abort the fetch.
+        try {
+          await services.syncTabGroupsToServer();
+        } catch (error) {
+          throw new OpenedTabsSyncError(error);
+        }
         closePopup();
       } catch (error) {
         console.error("Unable to open selected tabs:", error);
@@ -176,8 +185,13 @@ export function usePopupController(
           text:
             error instanceof OpenedTabsCleanupError
               ? error.message
-              : "Some tabs could not be opened. Try a smaller selection.",
+              : error instanceof OpenedTabsSyncError
+                ? error.message
+                : "Some tabs could not be opened. Try a smaller selection.",
         });
+        if (error instanceof OpenedTabsSyncError) {
+          closePopup();
+        }
       } finally {
         setOpeningMode(null);
       }

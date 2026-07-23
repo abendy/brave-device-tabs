@@ -12,6 +12,7 @@ describe("openTabsInBrowser", () => {
   const group = vi.fn();
   const updateTab = vi.fn();
   const updateWindow = vi.fn();
+  const updateGroup = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -20,6 +21,7 @@ describe("openTabsInBrowser", () => {
       runtime: { lastError: undefined },
       tabGroups: {
         query: vi.fn(async () => [{ id: 7, title: "Research", windowId: 2 }]),
+        update: updateGroup,
       },
       tabs: { create, group, update: updateTab },
       windows: {
@@ -63,6 +65,40 @@ describe("openTabsInBrowser", () => {
 
     expect(recordOpenedBatch).not.toHaveBeenCalled();
     expect(updateTab).toHaveBeenCalledWith(11, { active: true });
+  });
+
+  it("creates a new tab group for a destination with no live match, and titles it", async () => {
+    create.mockReset();
+    create.mockResolvedValueOnce({ id: 21 });
+    group.mockResolvedValueOnce(55);
+
+    await openTabsInBrowser([tab("shared:one", "Reading List")]);
+
+    expect(group).toHaveBeenCalledWith({ tabIds: [21] });
+    expect(updateGroup).toHaveBeenCalledWith(55, { title: "Reading List" });
+  });
+
+  it("adds tabs sharing the same unmatched destination into one newly-created group", async () => {
+    create.mockReset();
+    create.mockResolvedValueOnce({ id: 21 }).mockResolvedValueOnce({ id: 22 });
+    group.mockResolvedValueOnce(55);
+
+    await openTabsInBrowser([tab("shared:one", "Reading List"), tab("shared:two", "Reading List")]);
+
+    expect(group).toHaveBeenNthCalledWith(1, { tabIds: [21] });
+    expect(group).toHaveBeenNthCalledWith(2, { groupId: 55, tabIds: [22] });
+    expect(updateGroup).toHaveBeenCalledTimes(1);
+    expect(updateGroup).toHaveBeenCalledWith(55, { title: "Reading List" });
+  });
+
+  it("leaves tabs without a destination ungrouped", async () => {
+    create.mockReset();
+    create.mockResolvedValueOnce({ id: 21 });
+
+    await openTabsInBrowser([tab("sync:one", null)]);
+
+    expect(group).not.toHaveBeenCalled();
+    expect(updateGroup).not.toHaveBeenCalled();
   });
 });
 

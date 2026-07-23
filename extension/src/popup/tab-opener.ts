@@ -16,6 +16,14 @@ export class OpenedTabsCleanupError extends Error {
   }
 }
 
+export class OpenedTabsSyncError extends Error {
+  constructor(cause: unknown) {
+    const detail = cause instanceof Error ? ` ${cause.message}` : "";
+    super(`The tabs opened, but their tab group snapshot could not be synced.${detail}`, { cause });
+    this.name = "OpenedTabsSyncError";
+  }
+}
+
 export async function openTabsInBrowser(tabs: DeviceTab[]): Promise<void> {
   if (tabs.length === 0) {
     return;
@@ -41,6 +49,10 @@ async function createBrowserTabs(
   liveGroups: chrome.tabGroups.TabGroup[],
 ): Promise<FirstCreatedTab> {
   let firstTab: FirstCreatedTab | null = null;
+  // Tracks new groups created within this batch, keyed by lower-cased title,
+  // so multiple tabs sharing an unmatched destination land in one group
+  // instead of each creating their own.
+  const newGroupIdsByTitle = new Map<string, number>();
 
   for (const tab of tabs) {
     const destination = resolveTabDestination(tab, defaultWindowId, liveGroups);
@@ -55,6 +67,8 @@ async function createBrowserTabs(
 
     if (destination.groupId !== null) {
       await chrome.tabs.group({ groupId: destination.groupId, tabIds: [created.id] });
+    } else if (destination.newGroupTitle !== null) {
+      await addTabToNewGroup(created.id, destination.newGroupTitle, newGroupIdsByTitle);
     }
     firstTab ??= { id: created.id, windowId: destination.windowId };
   }
@@ -63,6 +77,23 @@ async function createBrowserTabs(
     throw new Error("No browser tabs were created.");
   }
   return firstTab;
+}
+
+async function addTabToNewGroup(
+  tabId: number,
+  title: string,
+  newGroupIdsByTitle: Map<string, number>,
+): Promise<void> {
+  const key = title.toLocaleLowerCase();
+  const existingGroupId = newGroupIdsByTitle.get(key);
+  if (existingGroupId !== undefined) {
+    await chrome.tabs.group({ groupId: existingGroupId, tabIds: [tabId] });
+    return;
+  }
+
+  const groupId = await chrome.tabs.group({ tabIds: [tabId] });
+  newGroupIdsByTitle.set(key, groupId);
+  await chrome.tabGroups.update(groupId, { title });
 }
 
 async function activateFirstTab(firstTab: FirstCreatedTab, currentWindowId: number): Promise<void> {

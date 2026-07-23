@@ -16,8 +16,12 @@ struct LinksView: View {
     @State private var dragContext: LinkDragContext?
     @State private var moveErrorMessage: String?
     @State private var deleteErrorMessage: String?
+    @State private var stagedLinkIDs: Set<String> = []
+    @State private var newGroupName: String = ""
+    @State private var loadCoordinator = LinksLoadCoordinator()
 
     private static let noGroupTitle = "No group"
+    private static let newGroupSectionID = "new-group"
 
     var body: some View {
         NavigationStack {
@@ -68,10 +72,10 @@ struct LinksView: View {
 
     @ViewBuilder
     private var content: some View {
-        if isLoading && links.isEmpty && errorMessage == nil {
+        if isLoading && links.isEmpty && browserGroups.isEmpty && errorMessage == nil {
             ProgressView("Loading links…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let errorMessage, links.isEmpty {
+        } else if let errorMessage, links.isEmpty && browserGroups.isEmpty {
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.largeTitle)
@@ -106,6 +110,24 @@ struct LinksView: View {
                         )
                     }
 
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("New Group")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .textCase(.uppercase)
+                            .padding(.horizontal, 4)
+
+                        NewGroupDropTarget(
+                            sectionID: Self.newGroupSectionID,
+                            stagedLinks: stagedLinks,
+                            dragContext: $dragContext,
+                            groupName: $newGroupName,
+                            onStage: stage,
+                            onUnstage: unstage,
+                            onSave: saveNewGroup
+                        )
+                    }
+
                     ForEach(windowSections) { window in
                         WindowGroupDisclosure(
                             window: window,
@@ -123,7 +145,7 @@ struct LinksView: View {
             .alert(
                 "Couldn't refresh links",
                 isPresented: Binding(
-                    get: { errorMessage != nil && !links.isEmpty },
+                    get: { errorMessage != nil && (!links.isEmpty || !browserGroups.isEmpty) },
                     set: { if !$0 { errorMessage = nil } }
                 )
             ) {
@@ -162,10 +184,12 @@ struct LinksView: View {
         return trimmed
     }
 
+    /// Links staged into the New Group card render only there, not in their
+    /// old section, until they're saved (or unstaged).
     private var groupedLinks: (byDestination: [String: [SharedLink]], noGroup: [SharedLink]) {
         var byDestination: [String: [SharedLink]] = [:]
         var noGroup: [SharedLink] = []
-        for link in links {
+        for link in links where !stagedLinkIDs.contains(link.id) {
             if let destination = normalizedDestination(link.destination) {
                 byDestination[destination, default: []].append(link)
             } else {
@@ -174,6 +198,10 @@ struct LinksView: View {
         }
 
         return (byDestination, noGroup)
+    }
+
+    private var stagedLinks: [SharedLink] {
+        links.filter { stagedLinkIDs.contains($0.id) }
     }
 
     private var noGroupSection: LinkSection {
@@ -205,17 +233,7 @@ struct LinksView: View {
             )
         }
 
-        var windows = groupsByWindow.keys.sorted().map { windowID in
-            WindowSection(
-                id: "window:\(windowID)",
-                title: "Tab Groups",
-                groups: (groupsByWindow[windowID] ?? []).sorted {
-                    $0.sortIndex == $1.sortIndex
-                        ? $0.title.localizedStandardCompare($1.title) == .orderedAscending
-                        : $0.sortIndex < $1.sortIndex
-                }
-            )
-        }
+        var windows: [WindowSection] = []
 
         let unknownDestinations = linksByDestination.keys.filter { !claimedDestinations.contains($0) }.sorted {
             $0.localizedStandardCompare($1) == .orderedAscending
@@ -235,6 +253,18 @@ struct LinksView: View {
                         )
                     }
                 )
+            )
+        }
+
+        windows += groupsByWindow.keys.sorted().map { windowID in
+            WindowSection(
+                id: "window:\(windowID)",
+                title: "Tab Groups",
+                groups: (groupsByWindow[windowID] ?? []).sorted {
+                    $0.sortIndex == $1.sortIndex
+                        ? $0.title.localizedStandardCompare($1.title) == .orderedAscending
+                        : $0.sortIndex < $1.sortIndex
+                }
             )
         }
 
@@ -267,6 +297,25 @@ struct LinksView: View {
         }
     }
 
+    private func stage(linkID: String) {
+        stagedLinkIDs.insert(linkID)
+    }
+
+    private func unstage(linkID: String) {
+        stagedLinkIDs.remove(linkID)
+    }
+
+    private func saveNewGroup() {
+        let trimmedName = newGroupName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return }
+
+        for linkID in stagedLinkIDs {
+            move(linkID: linkID, to: trimmedName)
+        }
+        stagedLinkIDs.removeAll()
+        newGroupName = ""
+    }
+
     private func delete(linkID: String) {
         guard let index = links.firstIndex(where: { $0.id == linkID }) else { return }
         let deletedLink = links.remove(at: index)
@@ -291,23 +340,65 @@ struct LinksView: View {
     }
 
     private func load() async {
+        let generation = loadCoordinator.beginLoad()
         guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
+            guard loadCoordinator.isCurrent(generation) else { return }
             isLoading = false
             errorMessage = PocketBaseError.notConfigured.localizedDescription
             return
         }
 
-        async let browserGroupsTask = PocketBaseClient.fetchBrowserGroups(serverURL: serverURL, token: token)
-        do {
-            let fetchedLinks = try await PocketBaseClient.fetchSharedLinks()
-            let fetchedBrowserGroups = await browserGroupsTask
+        async let linksTask: Result<[SharedLink], Error> = {
+            do {
+                return .success(try await PocketBaseClient.fetchSharedLinks())
+            } catch {
+                return .failure(error)
+            }
+        }()
+        async let browserGroupsTask: Result<[BrowserGroup], Error> = {
+            do {
+                return .success(
+                    try await PocketBaseClient.fetchBrowserGroups(serverURL: serverURL, token: token)
+                )
+            } catch {
+                return .failure(error)
+            }
+        }()
+        let (linksResult, browserGroupsResult) = await (linksTask, browserGroupsTask)
+
+        guard loadCoordinator.isCurrent(generation) else { return }
+
+        var nextErrorMessage: String?
+        switch linksResult {
+        case .success(let fetchedLinks):
             links = fetchedLinks
-            browserGroups = fetchedBrowserGroups
-            errorMessage = nil
-        } catch {
-            errorMessage = error.localizedDescription
+        case .failure(let error):
+            nextErrorMessage = error.localizedDescription
         }
+        switch browserGroupsResult {
+        case .success(let fetchedBrowserGroups):
+            browserGroups = fetchedBrowserGroups
+        case .failure(let error):
+            let groupError = "Tab groups could not be refreshed; existing group data may be stale. \(error.localizedDescription)"
+            nextErrorMessage = nextErrorMessage.map { "\($0) \(groupError)" } ?? groupError
+        }
+        errorMessage = nextErrorMessage
         isLoading = false
+    }
+}
+
+/// Kept as non-observable reference state so starting a refresh does not
+/// invalidate the view and cancel SwiftUI's `.refreshable` task.
+private final class LinksLoadCoordinator {
+    private var generation = 0
+
+    func beginLoad() -> Int {
+        generation += 1
+        return generation
+    }
+
+    func isCurrent(_ candidate: Int) -> Bool {
+        candidate == generation
     }
 }
 
@@ -478,6 +569,105 @@ private struct GroupDropTarget: View {
                             dragContext = LinkDragContext(linkID: link.id, sourceSectionID: sectionID)
                             return NSItemProvider(object: link.id as NSString)
                         }
+                }
+            }
+        }
+    }
+}
+
+/// Mirrors `GroupDropTarget`'s drop-ready card, but a drop here stages the
+/// link locally instead of committing a PocketBase move immediately: the
+/// group name isn't known yet, so nothing is written to the server until
+/// Save is tapped.
+private struct NewGroupDropTarget: View {
+    let sectionID: String
+    let stagedLinks: [SharedLink]
+    @Binding var dragContext: LinkDragContext?
+    @Binding var groupName: String
+    let onStage: (_ linkID: String) -> Void
+    let onUnstage: (_ linkID: String) -> Void
+    let onSave: () -> Void
+
+    @State private var isTargeted = false
+
+    private var trimmedName: String {
+        groupName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !stagedLinks.isEmpty {
+                HStack(spacing: 8) {
+                    TextField("Group name", text: $groupName)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Save", action: onSave)
+                        .disabled(trimmedName.isEmpty)
+                }
+                .padding(12)
+            }
+
+            ZStack {
+                rows
+                    .opacity(isTargeted ? 0 : 1)
+                    .allowsHitTesting(!isTargeted)
+                    .accessibilityHidden(isTargeted)
+
+                if isTargeted {
+                    DropReadyView()
+                        .allowsHitTesting(false)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(uiColor: .secondarySystemGroupedBackground))
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .animation(.easeInOut(duration: 0.15), value: isTargeted)
+        .onDrop(
+            of: [.plainText],
+            delegate: LinkDropDelegate(
+                sectionID: sectionID,
+                destination: nil,
+                dragContext: $dragContext,
+                isTargeted: $isTargeted,
+                onDrop: { linkID, _ in onStage(linkID) }
+            )
+        )
+    }
+
+    @ViewBuilder
+    private var rows: some View {
+        if stagedLinks.isEmpty {
+            Text("Drag a link here")
+                .font(.footnote)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+                .padding(.horizontal, 16)
+        } else {
+            VStack(spacing: 0) {
+                ForEach(stagedLinks) { link in
+                    if link.id != stagedLinks.first?.id {
+                        Divider()
+                            .padding(.leading, 16)
+                    }
+
+                    HStack(spacing: 8) {
+                        LinkRow(link: link)
+                        Spacer(minLength: 8)
+                        Button {
+                            onUnstage(link.id)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Remove from New Group")
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
                 }
             }
         }

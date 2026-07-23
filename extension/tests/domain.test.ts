@@ -51,9 +51,24 @@ describe("popup domain", () => {
     const tab = sharedTab("one", "Research");
     const groups = [{ id: 9, title: " research ", windowId: 12 }] as chrome.tabGroups.TabGroup[];
 
-    expect(resolveTabDestination(tab, 3, groups)).toEqual({ groupId: 9, windowId: 12 });
+    expect(resolveTabDestination(tab, 3, groups)).toEqual({
+      groupId: 9,
+      newGroupTitle: null,
+      windowId: 12,
+    });
     expect(resolveTabDestination({ ...tab, destination: "Missing" }, 3, groups)).toEqual({
       groupId: null,
+      newGroupTitle: "Missing",
+      windowId: 3,
+    });
+  });
+
+  it("reports no new group needed when a tab has no destination", () => {
+    const tab = sharedTab("one", null);
+
+    expect(resolveTabDestination(tab, 3, [])).toEqual({
+      groupId: null,
+      newGroupTitle: null,
       windowId: 3,
     });
   });

@@ -12,6 +12,8 @@ export interface SharedLinkRecord {
 
 export interface TabDestination {
   groupId: number | null;
+  /** Set when `destination` didn't match any live group, so the caller needs to create one. */
+  newGroupTitle: string | null;
   windowId: number;
 }
 
@@ -122,14 +124,15 @@ export function resolveTabDestination(
   liveGroups: chrome.tabGroups.TabGroup[],
 ): TabDestination {
   if (!tab.destination) {
-    return { groupId: null, windowId: defaultWindowId };
+    return { groupId: null, newGroupTitle: null, windowId: defaultWindowId };
   }
 
-  const target = tab.destination.trim().toLocaleLowerCase();
+  const trimmedDestination = tab.destination.trim();
+  const target = trimmedDestination.toLocaleLowerCase();
   const match = liveGroups.find((group) => group.title?.trim().toLocaleLowerCase() === target);
   return match
-    ? { groupId: match.id, windowId: match.windowId }
-    : { groupId: null, windowId: defaultWindowId };
+    ? { groupId: match.id, newGroupTitle: null, windowId: match.windowId }
+    : { groupId: null, newGroupTitle: trimmedDestination, windowId: defaultWindowId };
 }
 
 export function isOpenableUrl(url: string): boolean {

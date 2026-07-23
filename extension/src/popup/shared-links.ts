@@ -86,44 +86,37 @@ async function markSharedLinkOpened(serverUrl: string, token: string, id: string
 }
 
 export async function syncTabGroupsToServer(): Promise<void> {
-  try {
-    const { serverUrl, token } = await readServerConfig();
-    if (!serverUrl || !token || !chrome.tabGroups?.query) {
-      return;
-    }
-
-    const [liveGroups, tabs] = await Promise.all([
-      chrome.tabGroups.query({}),
-      chrome.tabs.query({}),
-    ]);
-    const firstTabIndexByGroup = new Map<number, number>();
-    for (const tab of tabs) {
-      if (tab.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE) {
-        continue;
-      }
-      const currentIndex = firstTabIndexByGroup.get(tab.groupId);
-      if (currentIndex === undefined || tab.index < currentIndex) {
-        firstTabIndexByGroup.set(tab.groupId, tab.index);
-      }
-    }
-
-    const groups = liveGroups.flatMap((group) => {
-      const title = group.title?.trim();
-      return title
-        ? [
-            {
-              color: group.color,
-              index: firstTabIndexByGroup.get(group.id) ?? 0,
-              title,
-              windowId: group.windowId,
-            },
-          ]
-        : [];
-    });
-    await writeTabGroups(serverUrl, token, groups);
-  } catch (error) {
-    console.warn("Unable to sync tab groups:", error);
+  const { serverUrl, token } = await readServerConfig();
+  if (!serverUrl || !token || !chrome.tabGroups?.query) {
+    return;
   }
+
+  const [liveGroups, tabs] = await Promise.all([chrome.tabGroups.query({}), chrome.tabs.query({})]);
+  const firstTabIndexByGroup = new Map<number, number>();
+  for (const tab of tabs) {
+    if (tab.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE) {
+      continue;
+    }
+    const currentIndex = firstTabIndexByGroup.get(tab.groupId);
+    if (currentIndex === undefined || tab.index < currentIndex) {
+      firstTabIndexByGroup.set(tab.groupId, tab.index);
+    }
+  }
+
+  const groups = liveGroups.flatMap((group) => {
+    const title = group.title?.trim();
+    return title
+      ? [
+          {
+            color: group.color,
+            index: firstTabIndexByGroup.get(group.id) ?? 0,
+            title,
+            windowId: group.windowId,
+          },
+        ]
+      : [];
+  });
+  await writeTabGroups(serverUrl, token, groups);
 }
 
 async function writeTabGroups(
@@ -140,14 +133,31 @@ async function writeTabGroups(
   const response = await fetch(`${collectionUrl}?perPage=1`, {
     headers: { Authorization: token },
   });
-  const data = response.ok
-    ? ((await response.json()) as ListResponse<BrowserGroupRecord>)
-    : { items: [] };
+  if (!response.ok) {
+    throw await pocketBaseResponseError(response, "Loading tab groups");
+  }
+  const data = (await response.json()) as ListResponse<BrowserGroupRecord>;
   const record = data.items?.[0];
 
-  await fetch(record ? `${collectionUrl}/${record.id}` : collectionUrl, {
+  const writeResponse = await fetch(record ? `${collectionUrl}/${record.id}` : collectionUrl, {
     body: JSON.stringify({ groups }),
     headers: { Authorization: token, "Content-Type": "application/json" },
     method: record ? "PATCH" : "POST",
   });
+  if (!writeResponse.ok) {
+    throw await pocketBaseResponseError(writeResponse, "Syncing tab groups");
+  }
+}
+
+async function pocketBaseResponseError(response: Response, action: string): Promise<Error> {
+  let detail = "";
+  try {
+    const body = (await response.json()) as { message?: unknown };
+    if (typeof body.message === "string" && body.message.trim()) {
+      detail = ` ${body.message.trim()}`;
+    }
+  } catch {
+    // PocketBase can return an empty or non-JSON error body.
+  }
+  return new Error(`${action} failed (${response.status}).${detail}`);
 }

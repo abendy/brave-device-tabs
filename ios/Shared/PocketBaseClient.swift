@@ -152,17 +152,51 @@ enum PocketBaseClient {
     /// Best-effort: an empty list just means the cycling picker only offers
     /// "No group" - a fetch failure here must never block sharing.
     static func fetchGroupTitles(serverURL: URL, token: String) async -> [String] {
-        await fetchBrowserGroups(serverURL: serverURL, token: token).map(\.title)
+        do {
+            return try await fetchBrowserGroups(serverURL: serverURL, token: token).map(\.title)
+        } catch {
+            return []
+        }
     }
 
-    /// Best-effort for the same reason as `fetchGroupTitles`: callers can
-    /// continue with an empty group list when the browser has not synced yet.
-    static func fetchBrowserGroups(serverURL: URL, token: String) async -> [BrowserGroup] {
+    static func fetchBrowserGroups(serverURL: URL, token: String) async throws -> [BrowserGroup] {
         guard var components = URLComponents(
             url: serverURL.appendingPathComponent("api/collections/browser_groups/records"),
             resolvingAgainstBaseURL: false
-        ) else { return [] }
+        ) else { throw PocketBaseError.invalidResponse }
         components.queryItems = [URLQueryItem(name: "perPage", value: "1")]
+        guard let url = components.url else { throw PocketBaseError.invalidResponse }
+
+        var request = URLRequest(url: url)
+        request.setValue(token, forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw PocketBaseError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            throw PocketBaseError.server(errorMessage(from: data) ?? "Could not load tab groups (\(http.statusCode)).")
+        }
+
+        struct Record: Decodable { let groups: [BrowserGroup] }
+        struct ListResponse: Decodable { let items: [Record] }
+
+        let list = try JSONDecoder().decode(ListResponse.self, from: data)
+        return list.items.first?.groups ?? []
+    }
+
+    /// Best-effort for the same reason as `fetchGroupTitles`: covers group
+    /// names created purely on iOS (via LinksView's New Group card or a prior
+    /// "New group…" share) that have never synced back as a live browser tab
+    /// group, so `fetchGroupTitles` alone wouldn't offer them.
+    static func fetchKnownDestinations(serverURL: URL, token: String) async -> [String] {
+        guard var components = URLComponents(
+            url: serverURL.appendingPathComponent("api/collections/shared_links/records"),
+            resolvingAgainstBaseURL: false
+        ) else { return [] }
+        components.queryItems = [
+            URLQueryItem(name: "filter", value: "(opened=false)"),
+            URLQueryItem(name: "fields", value: "destination"),
+            URLQueryItem(name: "perPage", value: "200"),
+        ]
         guard let url = components.url else { return [] }
 
         var request = URLRequest(url: url)
@@ -172,11 +206,12 @@ enum PocketBaseClient {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return [] }
 
-            struct Record: Decodable { let groups: [BrowserGroup] }
+            struct Record: Decodable { let destination: String? }
             struct ListResponse: Decodable { let items: [Record] }
 
-            let list = try JSONDecoder().decode(ListResponse.self, from: data)
-            return list.items.first?.groups ?? []
+            let items = try JSONDecoder().decode(ListResponse.self, from: data).items
+            return items.compactMap { $0.destination?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
         } catch {
             return []
         }

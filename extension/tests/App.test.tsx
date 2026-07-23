@@ -79,8 +79,18 @@ describe("App", () => {
     const beta = tab("beta", "Beta article");
     const openTabs = vi.fn(async () => undefined);
     const closePopup = vi.fn();
+    const services = servicesWith([device(alpha, beta)], openTabs);
+    let finishPostOpenSync!: () => void;
+    const postOpenSync = new Promise<void>((resolve) => {
+      finishPostOpenSync = resolve;
+    });
+    const syncTabGroupsToServer = vi
+      .fn<() => Promise<void>>()
+      .mockResolvedValueOnce(undefined)
+      .mockReturnValueOnce(postOpenSync);
+    services.syncTabGroupsToServer = syncTabGroupsToServer;
 
-    await renderApp(root, servicesWith([device(alpha, beta)], openTabs), closePopup);
+    await renderApp(root, services, closePopup);
     await clickButton(container, "Devices");
     expect(container.textContent).toContain("1 device · 2 tabs");
 
@@ -97,6 +107,34 @@ describe("App", () => {
     await clickButton(container, "Open selected (1)");
 
     expect(openTabs).toHaveBeenCalledWith([alpha]);
+    expect(syncTabGroupsToServer).toHaveBeenCalledTimes(2);
+    expect(closePopup).not.toHaveBeenCalled();
+
+    finishPostOpenSync();
+    await vi.waitFor(() => expect(closePopup).toHaveBeenCalledOnce());
+  });
+
+  it("reports a tab group sync failure after the tabs open successfully", async () => {
+    const alpha = tab("alpha", "Alpha article");
+    const openTabs = vi.fn(async () => undefined);
+    const closePopup = vi.fn();
+    const services = servicesWith([device(alpha)], openTabs);
+    services.syncTabGroupsToServer = vi
+      .fn<() => Promise<void>>()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("Syncing tab groups failed (500)."));
+
+    await renderApp(root, services, closePopup);
+    await clickButton(container, "Devices");
+    await clickButton(container, "Open all (1)");
+
+    expect(openTabs).toHaveBeenCalledWith([alpha]);
+    expect(container.textContent).toContain(
+      "The tabs opened, but their tab group snapshot could not be synced.",
+    );
+    expect(container.textContent).not.toContain(
+      "Some tabs could not be opened. Try a smaller selection.",
+    );
     expect(closePopup).toHaveBeenCalledOnce();
   });
 

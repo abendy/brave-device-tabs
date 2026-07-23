@@ -77,4 +77,58 @@ describe("markSharedLinksOpened", () => {
       }),
     );
   });
+
+  it("rejects when loading the existing tab group snapshot fails", async () => {
+    fetchMock.mockResolvedValue({
+      json: async () => ({ message: "The request requires valid authentication." }),
+      ok: false,
+      status: 401,
+    });
+
+    await expect(syncTabGroupsToServer()).rejects.toThrow(
+      "Loading tab groups failed (401). The request requires valid authentication.",
+    );
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects when updating the existing tab group snapshot fails", async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        json: async () => ({ items: [{ id: "groups-record" }] }),
+        ok: true,
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({ message: "Something went wrong." }),
+        ok: false,
+        status: 500,
+      });
+
+    await expect(syncTabGroupsToServer()).rejects.toThrow(
+      "Syncing tab groups failed (500). Something went wrong.",
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://pocketbase.test/api/collections/browser_groups/records/groups-record",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+
+  it("rejects when creating the first tab group snapshot fails", async () => {
+    fetchMock
+      .mockResolvedValueOnce({ json: async () => ({ items: [] }), ok: true })
+      .mockResolvedValueOnce({
+        json: async () => ({ message: "The request was rejected." }),
+        ok: false,
+        status: 403,
+      });
+
+    await expect(syncTabGroupsToServer()).rejects.toThrow(
+      "Syncing tab groups failed (403). The request was rejected.",
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://pocketbase.test/api/collections/browser_groups/records",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
 });

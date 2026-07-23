@@ -17,15 +17,20 @@ struct ShareComposeView: View {
                     }
 
                     Section("Destination") {
-                        Picker(selection: $model.selectedGroup) {
-                            Text("No group").tag(String?.none)
+                        Picker(selection: $model.selectedDestination) {
+                            Text("No group").tag(ShareComposeModel.Destination.none)
+                            Text("New group…").tag(ShareComposeModel.Destination.new)
                             ForEach(model.availableGroups, id: \.self) { group in
-                                Text(group).tag(String?.some(group))
+                                Text(group).tag(ShareComposeModel.Destination.existing(group))
                             }
                         } label: {
                             Text("Destination")
                         }
                         .pickerStyle(.menu)
+
+                        if model.selectedDestination == .new {
+                            TextField("Group name", text: $model.newGroupName)
+                        }
                     }
                 }
 
@@ -55,7 +60,7 @@ struct ShareComposeView: View {
                         ProgressView()
                     } else {
                         Button("Post", action: model.post)
-                            .disabled(!model.isConfigured || model.sharedURL == nil)
+                            .disabled(!model.isConfigured || model.sharedURL == nil || model.isNewGroupNameMissing)
                     }
                 }
             }

@@ -42,11 +42,28 @@ final class ShareViewController: UIViewController {
         Task {
             // Best-effort: an empty result just leaves "No group" as the only
             // option, same as if this fetch had never run.
-            let groups = await PocketBaseClient.fetchGroupTitles(serverURL: serverURL, token: token)
+            async let liveGroupTitles = PocketBaseClient.fetchGroupTitles(serverURL: serverURL, token: token)
+            async let knownDestinations = PocketBaseClient.fetchKnownDestinations(serverURL: serverURL, token: token)
+            let groups = Self.mergeGroupTitles(await liveGroupTitles, await knownDestinations)
             await MainActor.run {
-                self.model.availableGroups = groups.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+                self.model.availableGroups = groups
             }
         }
+    }
+
+    /// Combines live browser tab groups with destinations already in use on
+    /// shared links (which may only exist as iOS-created "virtual" groups),
+    /// de-duplicating case-insensitively while preferring the live group's
+    /// casing when both sources agree.
+    private static func mergeGroupTitles(_ live: [String], _ known: [String]) -> [String] {
+        var seen = Set<String>()
+        var merged: [String] = []
+        for title in live + known {
+            let key = title.localizedLowercase
+            guard seen.insert(key).inserted else { continue }
+            merged.append(title)
+        }
+        return merged.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
     private func loadAttachment() {
