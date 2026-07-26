@@ -64,6 +64,17 @@ struct ShareComposeView: View {
                     }
                 }
             }
+            .alert(
+                "Couldn't save link",
+                isPresented: Binding(
+                    get: { model.saveErrorMessage != nil },
+                    set: { if !$0 { model.saveErrorMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(model.saveErrorMessage ?? "The link could not be saved.")
+            }
         }
     }
 }

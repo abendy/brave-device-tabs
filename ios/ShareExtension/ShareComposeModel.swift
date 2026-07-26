@@ -18,6 +18,7 @@ final class ShareComposeModel: ObservableObject {
     @Published var selectedDestination: Destination = .none
     @Published var newGroupName: String = ""
     @Published var isPosting = false
+    @Published var saveErrorMessage: String?
 
     var onCancel: (() -> Void)?
     var onComplete: (() -> Void)?
@@ -42,17 +43,22 @@ final class ShareComposeModel: ObservableObject {
         let destination = resolvedDestination()
 
         Task {
-            // Best-effort: the share sheet is about to dismiss regardless, so
-            // there's no UI left to surface a failure through.
-            try? await PocketBaseClient.shareLink(
-                url: sharedURL.absoluteString,
-                title: note.isEmpty ? nil : note,
-                source: UIDevice.current.name,
-                destination: destination
-            )
-            await MainActor.run {
-                self.isPosting = false
-                self.onComplete?()
+            do {
+                try await PocketBaseClient.shareLink(
+                    url: sharedURL.absoluteString,
+                    title: note.isEmpty ? nil : note,
+                    source: UIDevice.current.name,
+                    destination: destination
+                )
+                await MainActor.run {
+                    self.isPosting = false
+                    self.onComplete?()
+                }
+            } catch {
+                await MainActor.run {
+                    self.saveErrorMessage = error.localizedDescription
+                    self.isPosting = false
+                }
             }
         }
     }
