@@ -21,9 +21,13 @@ struct LinksView: View {
     @State private var stagedLinkIDs: Set<String> = []
     @State private var newGroupName: String = ""
     @State private var loadCoordinator = LinksLoadCoordinator()
+    @State private var collapsedWindowIDs: Set<String> = Set(
+        UserDefaults.standard.stringArray(forKey: LinksView.collapsedWindowsKey) ?? []
+    )
 
     private static let noGroupTitle = "No group"
     private static let newGroupSectionID = "new-group"
+    private static let collapsedWindowsKey = "collapsedLinkWindows"
 
     var body: some View {
         NavigationStack {
@@ -149,6 +153,7 @@ struct LinksView: View {
                     ForEach(windowSections) { window in
                         WindowGroupDisclosure(
                             window: window,
+                            isExpanded: isExpandedBinding(for: window.id),
                             dragContext: $dragContext,
                             onDrop: move,
                             onDelete: delete
@@ -397,6 +402,25 @@ struct LinksView: View {
         }
     }
 
+    /// Collapse state survives relaunches; window ids are ephemeral across
+    /// browser restarts, so stale entries simply stop matching and the
+    /// replacement window starts expanded (the default).
+    private func isExpandedBinding(for windowID: String) -> Binding<Bool> {
+        Binding(
+            get: { !collapsedWindowIDs.contains(windowID) },
+            set: { expanded in
+                if expanded {
+                    collapsedWindowIDs.remove(windowID)
+                } else {
+                    collapsedWindowIDs.insert(windowID)
+                }
+                UserDefaults.standard.set(
+                    Array(collapsedWindowIDs).sorted(), forKey: Self.collapsedWindowsKey
+                )
+            }
+        )
+    }
+
     private func retryLoad() {
         if links.isEmpty {
             isLoading = true
@@ -486,11 +510,19 @@ private final class LinksLoadCoordinator {
 
 private struct WindowGroupDisclosure: View {
     let window: LinksView.WindowSection
+    @Binding var isExpanded: Bool
     @Binding var dragContext: LinkDragContext?
     let onDrop: (_ linkID: String, _ destination: String?, _ windowID: Int?) -> Void
     let onDelete: (_ linkID: String) -> Void
 
-    @State private var isExpanded = true
+    private static let previewCount = 3
+
+    private var collapsedPreview: String {
+        let titles = window.groups.map(\.title)
+        let shown = titles.prefix(Self.previewCount).joined(separator: ", ")
+        let remaining = titles.count - Self.previewCount
+        return remaining > 0 ? "\(shown) +\(remaining)" : shown
+    }
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
@@ -507,11 +539,20 @@ private struct WindowGroupDisclosure: View {
             .padding(.top, 10)
             .padding(.leading, 8)
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "macwindow")
-                    .foregroundStyle(.secondary)
-                Text(window.title)
-                    .font(.headline)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Image(systemName: "macwindow")
+                        .foregroundStyle(.secondary)
+                    Text(window.title)
+                        .font(.headline)
+                }
+                if !isExpanded && !collapsedPreview.isEmpty {
+                    Text(collapsedPreview)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
             }
         }
         .tint(.primary)
