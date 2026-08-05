@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { markSharedLinksOpened, syncTabGroupsToServer } from "../src/popup/shared-links";
+import {
+  BROWSER_GROUPS_RECORD_ID,
+  markSharedLinksOpened,
+  syncTabGroupsToServer,
+} from "../src/popup/shared-links";
 
 describe("markSharedLinksOpened", () => {
   const fetchMock = vi.fn();
@@ -7,6 +11,10 @@ describe("markSharedLinksOpened", () => {
   const tabsQueryMock = vi.fn<() => Promise<chrome.tabs.Tab[]>>(async () => []);
 
   beforeEach(() => {
+    tabGroupsQueryMock.mockReset();
+    tabGroupsQueryMock.mockResolvedValue([]);
+    tabsQueryMock.mockReset();
+    tabsQueryMock.mockResolvedValue([]);
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("chrome", {
       storage: {
@@ -56,7 +64,6 @@ describe("markSharedLinksOpened", () => {
     ]);
     fetchMock
       .mockResolvedValueOnce({
-        json: async () => ({ items: [{ id: "groups-record" }] }),
         ok: true,
       })
       .mockResolvedValueOnce({ ok: true });
@@ -65,7 +72,7 @@ describe("markSharedLinksOpened", () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "https://pocketbase.test/api/collections/browser_groups/records/groups-record",
+      `https://pocketbase.test/api/collections/browser_groups/records/${BROWSER_GROUPS_RECORD_ID}`,
       expect.objectContaining({
         body: JSON.stringify({
           groups: [
@@ -99,15 +106,9 @@ describe("markSharedLinksOpened", () => {
       finishFirstWrite = () => resolve({ ok: true });
     });
     fetchMock
-      .mockResolvedValueOnce({
-        json: async () => ({ items: [{ id: "groups-record" }] }),
-        ok: true,
-      })
+      .mockResolvedValueOnce({ ok: true })
       .mockReturnValueOnce(firstWrite)
-      .mockResolvedValueOnce({
-        json: async () => ({ items: [{ id: "groups-record" }] }),
-        ok: true,
-      })
+      .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({ ok: true });
 
     const firstSync = syncTabGroupsToServer();
@@ -125,7 +126,7 @@ describe("markSharedLinksOpened", () => {
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "https://pocketbase.test/api/collections/browser_groups/records/groups-record",
+      `https://pocketbase.test/api/collections/browser_groups/records/${BROWSER_GROUPS_RECORD_ID}`,
       expect.objectContaining({
         body: JSON.stringify({
           groups: [{ color: "blue", index: 0, title: "Existing", windowId: 1 }],
@@ -135,7 +136,7 @@ describe("markSharedLinksOpened", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       4,
-      "https://pocketbase.test/api/collections/browser_groups/records/groups-record",
+      `https://pocketbase.test/api/collections/browser_groups/records/${BROWSER_GROUPS_RECORD_ID}`,
       expect.objectContaining({
         body: JSON.stringify({
           groups: [
@@ -165,10 +166,7 @@ describe("markSharedLinksOpened", () => {
         ok: false,
         status: 500,
       })
-      .mockResolvedValueOnce({
-        json: async () => ({ items: [{ id: "groups-record" }] }),
-        ok: true,
-      })
+      .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({ ok: true });
 
     await expect(syncTabGroupsToServer()).rejects.toThrow(
@@ -180,7 +178,7 @@ describe("markSharedLinksOpened", () => {
     expect(tabsQueryMock).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
-      "https://pocketbase.test/api/collections/browser_groups/records/groups-record",
+      `https://pocketbase.test/api/collections/browser_groups/records/${BROWSER_GROUPS_RECORD_ID}`,
       expect.objectContaining({
         body: JSON.stringify({
           groups: [{ color: "green", index: 4, title: "Fresh", windowId: 2 }],
@@ -204,35 +202,61 @@ describe("markSharedLinksOpened", () => {
   });
 
   it("rejects when updating the existing tab group snapshot fails", async () => {
-    fetchMock
-      .mockResolvedValueOnce({
-        json: async () => ({ items: [{ id: "groups-record" }] }),
-        ok: true,
-      })
-      .mockResolvedValueOnce({
-        json: async () => ({ message: "Something went wrong." }),
-        ok: false,
-        status: 500,
-      });
+    fetchMock.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({
+      json: async () => ({ message: "Something went wrong." }),
+      ok: false,
+      status: 500,
+    });
 
     await expect(syncTabGroupsToServer()).rejects.toThrow(
       "Syncing tab groups failed (500). Something went wrong.",
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "https://pocketbase.test/api/collections/browser_groups/records/groups-record",
+      `https://pocketbase.test/api/collections/browser_groups/records/${BROWSER_GROUPS_RECORD_ID}`,
+      expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+
+  it("re-gets and patches after a concurrent fixed-id creator wins", async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: false, status: 404 })
+      .mockResolvedValueOnce({
+        json: async () => ({ data: { id: { code: "validation_not_unique" } } }),
+        ok: false,
+        status: 400,
+      })
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true });
+
+    await expect(syncTabGroupsToServer()).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://pocketbase.test/api/collections/browser_groups/records",
+      expect.objectContaining({
+        body: JSON.stringify({ groups: [], id: BROWSER_GROUPS_RECORD_ID }),
+        method: "POST",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      `https://pocketbase.test/api/collections/browser_groups/records/${BROWSER_GROUPS_RECORD_ID}`,
+      expect.objectContaining({ headers: { Authorization: "token" } }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      `https://pocketbase.test/api/collections/browser_groups/records/${BROWSER_GROUPS_RECORD_ID}`,
       expect.objectContaining({ method: "PATCH" }),
     );
   });
 
   it("rejects when creating the first tab group snapshot fails", async () => {
-    fetchMock
-      .mockResolvedValueOnce({ json: async () => ({ items: [] }), ok: true })
-      .mockResolvedValueOnce({
-        json: async () => ({ message: "The request was rejected." }),
-        ok: false,
-        status: 403,
-      });
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 404 }).mockResolvedValueOnce({
+      json: async () => ({ message: "The request was rejected." }),
+      ok: false,
+      status: 403,
+    });
 
     await expect(syncTabGroupsToServer()).rejects.toThrow(
       "Syncing tab groups failed (403). The request was rejected.",
@@ -240,7 +264,10 @@ describe("markSharedLinksOpened", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       "https://pocketbase.test/api/collections/browser_groups/records",
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({
+        body: JSON.stringify({ groups: [], id: BROWSER_GROUPS_RECORD_ID }),
+        method: "POST",
+      }),
     );
   });
 });
