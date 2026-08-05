@@ -22,11 +22,16 @@ function copyExtensionFiles(): Plugin {
 export default defineConfig({
   plugins: [react(), copyExtensionFiles()],
   build: {
-    target: "chrome88",
+    target: "chrome92",
     rollupOptions: {
       input: {
+        background: resolve(projectRoot, "src/background/main.ts"),
         options: resolve(projectRoot, "options.html"),
         popup: resolve(projectRoot, "popup.html"),
+      },
+      output: {
+        entryFileNames: (chunkInfo) =>
+          chunkInfo.name === "background" ? "background.js" : "assets/[name]-[hash].js",
       },
     },
   },
