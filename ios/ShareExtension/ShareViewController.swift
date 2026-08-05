@@ -56,30 +56,62 @@ final class ShareViewController: UIViewController {
                 return
             }
 
-            // Best-effort: an empty result just leaves "No group" as the only
-            // option, same as if this fetch had never run.
-            async let liveGroupTitles = PocketBaseClient.fetchGroupTitles(serverURL: serverURL, token: token)
-            async let knownDestinations = PocketBaseClient.fetchKnownDestinations(serverURL: serverURL, token: token)
-            let groups = Self.mergeGroupTitles(await liveGroupTitles, await knownDestinations)
+            // Best-effort: empty sections just leave "No group" and "New
+            // group…" as the only options, same as if these fetches had
+            // never run.
+            async let liveGroupsTask: [BrowserGroup] = {
+                (try? await PocketBaseClient.fetchBrowserGroups(serverURL: serverURL, token: token)) ?? []
+            }()
+            async let knownDestinationsTask = PocketBaseClient.fetchKnownDestinations(
+                serverURL: serverURL, token: token
+            )
+            let sections = Self.destinationSections(
+                live: await liveGroupsTask, known: await knownDestinationsTask
+            )
             await MainActor.run {
-                self.model.availableGroups = groups
+                self.model.pendingGroups = sections.pending
+                self.model.windowGroups = sections.byWindow
             }
         }
     }
 
-    /// Combines live browser tab groups with destinations already in use on
-    /// shared links (which may only exist as iOS-created "virtual" groups),
-    /// de-duplicating case-insensitively while preferring the live group's
-    /// casing when both sources agree.
-    private static func mergeGroupTitles(_ live: [String], _ known: [String]) -> [String] {
-        var seen = Set<String>()
-        var merged: [String] = []
-        for title in live + known {
-            let key = title.localizedLowercase
-            guard seen.insert(key).inserted else { continue }
-            merged.append(title)
+    /// Mirrors the Links screen's ordering: iOS-created destinations with no
+    /// live browser tab group yet come first, then live groups clustered per
+    /// window (windows ascending, groups by first-tab index then title).
+    /// Unlike that screen, a menu picker cannot offer the same title twice —
+    /// the tag would be ambiguous — so a title duplicated across windows
+    /// keeps only its first window's row.
+    private static func destinationSections(
+        live: [BrowserGroup], known: [String]
+    ) -> (pending: [String], byWindow: [[String]]) {
+        var claimedTitles = Set<String>()
+        var groupsByWindow: [Int: [(title: String, sortIndex: Int)]] = [:]
+
+        for group in live {
+            let title = group.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty, claimedTitles.insert(title.localizedLowercase).inserted else {
+                continue
+            }
+            groupsByWindow[group.windowID, default: []].append((title, group.index))
         }
-        return merged.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+
+        let byWindow = groupsByWindow.keys.sorted().map { windowID in
+            (groupsByWindow[windowID] ?? [])
+                .sorted {
+                    $0.sortIndex == $1.sortIndex
+                        ? $0.title.localizedStandardCompare($1.title) == .orderedAscending
+                        : $0.sortIndex < $1.sortIndex
+                }
+                .map(\.title)
+        }
+
+        var seenPending = Set<String>()
+        let pending = known
+            .filter { !claimedTitles.contains($0.localizedLowercase) }
+            .filter { seenPending.insert($0.localizedLowercase).inserted }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+
+        return (pending, byWindow)
     }
 
     private func loadAttachment() {

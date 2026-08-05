@@ -25,8 +25,17 @@ struct ShareComposeView: View {
                         Picker(selection: $model.selectedDestination) {
                             Text("No group").tag(ShareComposeModel.Destination.none)
                             Text("New group…").tag(ShareComposeModel.Destination.new)
-                            ForEach(model.availableGroups, id: \.self) { group in
-                                Text(group).tag(ShareComposeModel.Destination.existing(group))
+                            if !model.pendingGroups.isEmpty {
+                                Divider()
+                                ForEach(model.pendingGroups, id: \.self) { group in
+                                    Text(group).tag(ShareComposeModel.Destination.existing(group))
+                                }
+                            }
+                            ForEach(model.windowGroups.indices, id: \.self) { windowIndex in
+                                Divider()
+                                ForEach(model.windowGroups[windowIndex], id: \.self) { group in
+                                    Text(group).tag(ShareComposeModel.Destination.existing(group))
+                                }
                             }
                         } label: {
                             Text("Destination")

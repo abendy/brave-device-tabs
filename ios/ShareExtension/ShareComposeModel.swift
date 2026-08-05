@@ -14,7 +14,13 @@ final class ShareComposeModel: ObservableObject {
 
     @Published var sharedURL: URL?
     @Published var noteText: String = ""
-    @Published var availableGroups: [String] = []
+    /// iOS-created destinations with no live browser tab group yet — the
+    /// Links screen's "Other groups". They lead the menu because a group just
+    /// created from iOS is the most likely pick when saving more links to it.
+    @Published var pendingGroups: [String] = []
+    /// Live browser tab groups, one array per window, in the Links screen's
+    /// window and in-window order.
+    @Published var windowGroups: [[String]] = []
     @Published var selectedDestination: Destination = .none
     @Published var newGroupName: String = ""
     @Published var isPosting = false

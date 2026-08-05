@@ -189,16 +189,6 @@ enum PocketBaseClient {
         }
     }
 
-    /// Best-effort: an empty list just means the cycling picker only offers
-    /// "No group" - a fetch failure here must never block sharing.
-    static func fetchGroupTitles(serverURL: URL, token: String) async -> [String] {
-        do {
-            return try await fetchBrowserGroups(serverURL: serverURL, token: token).map(\.title)
-        } catch {
-            return []
-        }
-    }
-
     static func fetchBrowserGroups(serverURL: URL, token: String) async throws -> [BrowserGroup] {
         guard var components = URLComponents(
             url: serverURL.appendingPathComponent("api/collections/browser_groups/records"),
@@ -223,10 +213,10 @@ enum PocketBaseClient {
         return list.items.first?.groups ?? []
     }
 
-    /// Best-effort for the same reason as `fetchGroupTitles`: covers group
+    /// Best-effort — a failure here must never block sharing. Covers group
     /// names created purely on iOS (via LinksView's New Group card or a prior
     /// "New group…" share) that have never synced back as a live browser tab
-    /// group, so `fetchGroupTitles` alone wouldn't offer them.
+    /// group, so `fetchBrowserGroups` alone wouldn't offer them.
     static func fetchKnownDestinations(serverURL: URL, token: String) async -> [String] {
         guard var components = URLComponents(
             url: serverURL.appendingPathComponent("api/collections/shared_links/records"),
