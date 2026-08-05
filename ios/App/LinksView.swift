@@ -563,6 +563,10 @@ private struct WindowGroupDisclosure: View {
         return remaining > 0 ? "\(shown) +\(remaining)" : shown
     }
 
+    private var totalLinkCount: Int {
+        window.groups.reduce(0) { $0 + $1.links.count }
+    }
+
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
             LazyVStack(alignment: .leading, spacing: 10) {
@@ -584,6 +588,12 @@ private struct WindowGroupDisclosure: View {
                         .foregroundStyle(.secondary)
                     Text(window.title)
                         .font(.headline)
+                    if !isExpanded {
+                        Spacer()
+                        Text("\(totalLinkCount)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 if !isExpanded && !collapsedPreview.isEmpty {
                     Text(collapsedPreview)
