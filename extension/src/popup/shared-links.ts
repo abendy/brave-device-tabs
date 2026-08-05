@@ -11,9 +11,7 @@ interface ListResponse<Item> {
   items?: Item[];
 }
 
-interface BrowserGroupRecord {
-  id: string;
-}
+export const BROWSER_GROUPS_RECORD_ID = "browsergroups01";
 
 export async function loadSharedLinksDevices(): Promise<Device[]> {
   try {
@@ -140,22 +138,71 @@ async function writeTabGroups(
   }>,
 ): Promise<void> {
   const collectionUrl = `${serverUrl}/api/collections/browser_groups/records`;
-  const response = await fetch(`${collectionUrl}?perPage=1`, {
+  const recordUrl = `${collectionUrl}/${BROWSER_GROUPS_RECORD_ID}`;
+  const response = await fetch(recordUrl, {
     headers: { Authorization: token },
   });
-  if (!response.ok) {
+  if (response.ok) {
+    await patchTabGroups(recordUrl, token, groups);
+    return;
+  }
+  if (response.status !== 404) {
     throw await pocketBaseResponseError(response, "Loading tab groups");
   }
-  const data = (await response.json()) as ListResponse<BrowserGroupRecord>;
-  const record = data.items?.[0];
 
-  const writeResponse = await fetch(record ? `${collectionUrl}/${record.id}` : collectionUrl, {
+  const createResponse = await fetch(collectionUrl, {
+    body: JSON.stringify({ groups, id: BROWSER_GROUPS_RECORD_ID }),
+    headers: { Authorization: token, "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (createResponse.ok) {
+    return;
+  }
+  if (!(await isBrowserGroupsIdConflict(createResponse))) {
+    throw await pocketBaseResponseError(createResponse, "Syncing tab groups");
+  }
+
+  const retryResponse = await fetch(recordUrl, {
+    headers: { Authorization: token },
+  });
+  if (!retryResponse.ok) {
+    throw await pocketBaseResponseError(retryResponse, "Loading tab groups");
+  }
+  await patchTabGroups(recordUrl, token, groups);
+}
+
+async function patchTabGroups(
+  recordUrl: string,
+  token: string,
+  groups: Array<{
+    color: chrome.tabGroups.TabGroup["color"];
+    index: number;
+    title: string;
+    windowId: number;
+  }>,
+): Promise<void> {
+  const response = await fetch(recordUrl, {
     body: JSON.stringify({ groups }),
     headers: { Authorization: token, "Content-Type": "application/json" },
-    method: record ? "PATCH" : "POST",
+    method: "PATCH",
   });
-  if (!writeResponse.ok) {
-    throw await pocketBaseResponseError(writeResponse, "Syncing tab groups");
+  if (!response.ok) {
+    throw await pocketBaseResponseError(response, "Syncing tab groups");
+  }
+}
+
+async function isBrowserGroupsIdConflict(response: Response): Promise<boolean> {
+  if (response.status !== 400) {
+    return false;
+  }
+
+  try {
+    const body = (await response.json()) as {
+      data?: { id?: { code?: unknown } };
+    };
+    return body.data?.id?.code === "validation_not_unique";
+  } catch {
+    return false;
   }
 }
 
