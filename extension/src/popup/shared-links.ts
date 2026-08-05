@@ -85,7 +85,17 @@ async function markSharedLinkOpened(serverUrl: string, token: string, id: string
   }
 }
 
-export async function syncTabGroupsToServer(): Promise<void> {
+let syncQueue: Promise<void> = Promise.resolve();
+
+export function syncTabGroupsToServer(): Promise<void> {
+  const run = syncQueue.then(() => performTabGroupSync());
+  // Keep later passes moving after a failed sync while preserving this
+  // caller's rejection through the separately returned `run` promise.
+  syncQueue = run.catch(() => undefined);
+  return run;
+}
+
+async function performTabGroupSync(): Promise<void> {
   const { serverUrl, token } = await readServerConfig();
   if (!serverUrl || !token || !chrome.tabGroups?.query) {
     return;

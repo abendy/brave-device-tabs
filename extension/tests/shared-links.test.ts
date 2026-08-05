@@ -78,6 +78,118 @@ describe("markSharedLinksOpened", () => {
     );
   });
 
+  it("serializes overlapping syncs and writes each fresh browser snapshot in order", async () => {
+    tabGroupsQueryMock
+      .mockResolvedValueOnce([
+        { collapsed: false, color: "blue", id: 1, shared: false, title: "Existing", windowId: 1 },
+      ])
+      .mockResolvedValueOnce([
+        { collapsed: false, color: "blue", id: 1, shared: false, title: "Existing", windowId: 1 },
+        { collapsed: false, color: "green", id: 2, shared: false, title: "New Group", windowId: 2 },
+      ]);
+    tabsQueryMock
+      .mockResolvedValueOnce([{ groupId: 1, index: 0 } as chrome.tabs.Tab])
+      .mockResolvedValueOnce([
+        { groupId: 1, index: 0 } as chrome.tabs.Tab,
+        { groupId: 2, index: 3 } as chrome.tabs.Tab,
+      ]);
+
+    let finishFirstWrite!: () => void;
+    const firstWrite = new Promise<{ ok: boolean }>((resolve) => {
+      finishFirstWrite = () => resolve({ ok: true });
+    });
+    fetchMock
+      .mockResolvedValueOnce({
+        json: async () => ({ items: [{ id: "groups-record" }] }),
+        ok: true,
+      })
+      .mockReturnValueOnce(firstWrite)
+      .mockResolvedValueOnce({
+        json: async () => ({ items: [{ id: "groups-record" }] }),
+        ok: true,
+      })
+      .mockResolvedValueOnce({ ok: true });
+
+    const firstSync = syncTabGroupsToServer();
+    const secondSync = syncTabGroupsToServer();
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(tabGroupsQueryMock).toHaveBeenCalledOnce();
+    expect(tabsQueryMock).toHaveBeenCalledOnce();
+
+    finishFirstWrite();
+    await Promise.all([firstSync, secondSync]);
+
+    expect(tabGroupsQueryMock).toHaveBeenCalledTimes(2);
+    expect(tabsQueryMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://pocketbase.test/api/collections/browser_groups/records/groups-record",
+      expect.objectContaining({
+        body: JSON.stringify({
+          groups: [{ color: "blue", index: 0, title: "Existing", windowId: 1 }],
+        }),
+        method: "PATCH",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "https://pocketbase.test/api/collections/browser_groups/records/groups-record",
+      expect.objectContaining({
+        body: JSON.stringify({
+          groups: [
+            { color: "blue", index: 0, title: "Existing", windowId: 1 },
+            { color: "green", index: 3, title: "New Group", windowId: 2 },
+          ],
+        }),
+        method: "PATCH",
+      }),
+    );
+  });
+
+  it("continues with a fresh sync after an earlier queued sync rejects", async () => {
+    tabGroupsQueryMock
+      .mockResolvedValueOnce([
+        { collapsed: false, color: "blue", id: 1, shared: false, title: "Stale", windowId: 1 },
+      ])
+      .mockResolvedValueOnce([
+        { collapsed: false, color: "green", id: 2, shared: false, title: "Fresh", windowId: 2 },
+      ]);
+    tabsQueryMock
+      .mockResolvedValueOnce([{ groupId: 1, index: 0 } as chrome.tabs.Tab])
+      .mockResolvedValueOnce([{ groupId: 2, index: 4 } as chrome.tabs.Tab]);
+    fetchMock
+      .mockResolvedValueOnce({
+        json: async () => ({ message: "Temporary failure." }),
+        ok: false,
+        status: 500,
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({ items: [{ id: "groups-record" }] }),
+        ok: true,
+      })
+      .mockResolvedValueOnce({ ok: true });
+
+    await expect(syncTabGroupsToServer()).rejects.toThrow(
+      "Loading tab groups failed (500). Temporary failure.",
+    );
+    await expect(syncTabGroupsToServer()).resolves.toBeUndefined();
+
+    expect(tabGroupsQueryMock).toHaveBeenCalledTimes(2);
+    expect(tabsQueryMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "https://pocketbase.test/api/collections/browser_groups/records/groups-record",
+      expect.objectContaining({
+        body: JSON.stringify({
+          groups: [{ color: "green", index: 4, title: "Fresh", windowId: 2 }],
+        }),
+        method: "PATCH",
+      }),
+    );
+  });
+
   it("rejects when loading the existing tab group snapshot fails", async () => {
     fetchMock.mockResolvedValue({
       json: async () => ({ message: "The request requires valid authentication." }),
