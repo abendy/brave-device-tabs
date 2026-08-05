@@ -9,7 +9,15 @@ struct RootView: View {
 
     var body: some View {
         if isSignedIn {
-            LinksView(onOpenSettings: { showSettings = true })
+            LinksView(
+                onOpenSettings: { showSettings = true },
+                onSessionExpired: {
+                    // Keep the server URL so the sign-in form comes back
+                    // prefilled; only the dead token is discarded.
+                    SharedStore.authToken = nil
+                    isSignedIn = false
+                }
+            )
                 .sheet(isPresented: $showSettings) {
                     ContentView(onSignedOut: {
                         isSignedIn = false

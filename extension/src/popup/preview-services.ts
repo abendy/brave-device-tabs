@@ -65,5 +65,6 @@ export const previewServices: PopupServices = {
   }),
   openOptionsPage: () => undefined,
   openTabs: async () => undefined,
+  refreshSession: async () => "valid",
   syncTabGroupsToServer: async () => undefined,
 };

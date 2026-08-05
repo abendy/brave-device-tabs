@@ -35,11 +35,27 @@ final class ShareViewController: UIViewController {
     }
 
     private func loadGroups() {
-        guard SharedStore.isConfigured, let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
+        guard SharedStore.isConfigured else {
             return
         }
 
         Task {
+            // A dead token would make both group sources below return empty
+            // instead of failing (SYNC_REVIEW.md finding #10), and the save
+            // itself could only be rejected — surface that state instead.
+            // The stored token is never cleared from here; only the app owns
+            // sign-in state.
+            let session = await PocketBaseClient.refreshSession()
+            if session == .expired {
+                await MainActor.run {
+                    self.model.isSessionExpired = true
+                }
+                return
+            }
+            guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
+                return
+            }
+
             // Best-effort: an empty result just leaves "No group" as the only
             // option, same as if this fetch had never run.
             async let liveGroupTitles = PocketBaseClient.fetchGroupTitles(serverURL: serverURL, token: token)

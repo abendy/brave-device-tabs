@@ -11,6 +11,11 @@ struct ShareComposeView: View {
                         Text("Open the Device Tabs Share app and sign in first.")
                             .foregroundStyle(.secondary)
                     }
+                } else if model.isSessionExpired {
+                    Section {
+                        Text("Session expired — open the Device Tabs Share app and sign in again.")
+                            .foregroundStyle(.secondary)
+                    }
                 } else {
                     Section("Note") {
                         TextField("Optional note", text: $model.noteText, axis: .vertical)
@@ -60,7 +65,10 @@ struct ShareComposeView: View {
                         ProgressView()
                     } else {
                         Button("Post", action: model.post)
-                            .disabled(!model.isConfigured || model.sharedURL == nil || model.isNewGroupNameMissing)
+                            .disabled(
+                                !model.isConfigured || model.isSessionExpired
+                                    || model.sharedURL == nil || model.isNewGroupNameMissing
+                            )
                     }
                 }
             }

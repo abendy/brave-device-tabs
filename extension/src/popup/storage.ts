@@ -17,6 +17,10 @@ export async function readServerConfig(): Promise<ServerConfig> {
   };
 }
 
+export async function writeToken(token: string): Promise<void> {
+  await chrome.storage.local.set({ [STORAGE_KEYS.token]: token });
+}
+
 export async function loadOpenedHistory(): Promise<OpenedBatch[]> {
   const values = await chrome.storage.local.get(OPENED_HISTORY_KEY);
   const history: unknown = values[OPENED_HISTORY_KEY];

@@ -6,11 +6,13 @@ import UniformTypeIdentifiers
 /// has no links so there is always somewhere to drop.
 struct LinksView: View {
     var onOpenSettings: () -> Void
+    var onSessionExpired: () -> Void
 
     @Environment(\.scenePhase) private var scenePhase
     @State private var links: [SharedLink] = []
     @State private var browserGroups: [BrowserGroup] = []
     @State private var isLoading = true
+    @State private var isSessionExpired = false
     @State private var errorMessage: String?
     @State private var hasCompletedInitialLoad = false
     @State private var dragContext: LinkDragContext?
@@ -72,7 +74,22 @@ struct LinksView: View {
 
     @ViewBuilder
     private var content: some View {
-        if isLoading && links.isEmpty && browserGroups.isEmpty && errorMessage == nil {
+        if isSessionExpired {
+            VStack(spacing: 12) {
+                Image(systemName: "person.crop.circle.badge.exclamationmark")
+                    .font(.largeTitle)
+                    .foregroundStyle(.secondary)
+                Text("Session expired")
+                    .font(.headline)
+                Text("Sign in again to keep sharing links between your devices.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("Sign In Again", action: onSessionExpired)
+            }
+            .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if isLoading && links.isEmpty && browserGroups.isEmpty && errorMessage == nil {
             ProgressView("Loading links…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let errorMessage, links.isEmpty && browserGroups.isEmpty {
@@ -341,8 +358,24 @@ struct LinksView: View {
 
     private func load() async {
         let generation = loadCoordinator.beginLoad()
-        guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
+        guard SharedStore.isConfigured else {
             guard loadCoordinator.isCurrent(generation) else { return }
+            isLoading = false
+            errorMessage = PocketBaseError.notConfigured.localizedDescription
+            return
+        }
+
+        // A dead token makes both list fetches below "succeed" with empty
+        // data (SYNC_REVIEW.md finding #10), so the session is validated —
+        // and rotated — before anything is fetched or committed.
+        let session = await PocketBaseClient.refreshSession()
+        guard loadCoordinator.isCurrent(generation) else { return }
+        if session == .expired {
+            isSessionExpired = true
+            isLoading = false
+            return
+        }
+        guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
             isLoading = false
             errorMessage = PocketBaseError.notConfigured.localizedDescription
             return

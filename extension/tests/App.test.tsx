@@ -138,6 +138,34 @@ describe("App", () => {
     expect(closePopup).toHaveBeenCalledOnce();
   });
 
+  it("shows the expired-session status and skips server reads and syncs", async () => {
+    const alpha = tab("alpha", "Alpha article");
+    const openTabs = vi.fn(async () => undefined);
+    const closePopup = vi.fn();
+    const services = servicesWith([device(alpha)], openTabs);
+    services.refreshSession = async () => "expired";
+    const loadSharedLinksDevices = vi.fn(async (): Promise<Device[]> => []);
+    services.loadSharedLinksDevices = loadSharedLinksDevices;
+    const syncTabGroupsToServer = vi.fn(async () => undefined);
+    services.syncTabGroupsToServer = syncTabGroupsToServer;
+
+    await renderApp(root, services, closePopup);
+
+    expect(container.textContent).toContain(
+      "Session expired — sign in again from the extension options.",
+    );
+    expect(loadSharedLinksDevices).not.toHaveBeenCalled();
+    expect(syncTabGroupsToServer).not.toHaveBeenCalled();
+
+    await clickButton(container, "Devices");
+    expect(container.textContent).toContain("Alpha article");
+    await clickButton(container, "Open all (1)");
+
+    expect(openTabs).toHaveBeenCalledWith([alpha]);
+    expect(syncTabGroupsToServer).not.toHaveBeenCalled();
+    expect(closePopup).toHaveBeenCalledOnce();
+  });
+
   it("shows opened history in the Opened view", async () => {
     const services = servicesWith([device(tab("alpha", "Alpha article"))]);
     services.loadOpenedHistory = async () => [
@@ -227,6 +255,7 @@ function servicesWith(devices: Device[], openTabs = vi.fn(async () => undefined)
     loadSyncedDevices: async () => ({ devices, error: null }),
     openOptionsPage: vi.fn(),
     openTabs,
+    refreshSession: async () => "valid",
     syncTabGroupsToServer: async () => undefined,
   };
 }

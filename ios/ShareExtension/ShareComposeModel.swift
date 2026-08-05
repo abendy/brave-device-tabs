@@ -18,6 +18,7 @@ final class ShareComposeModel: ObservableObject {
     @Published var selectedDestination: Destination = .none
     @Published var newGroupName: String = ""
     @Published var isPosting = false
+    @Published var isSessionExpired = false
     @Published var saveErrorMessage: String?
 
     var onCancel: (() -> Void)?

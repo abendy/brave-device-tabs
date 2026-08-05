@@ -52,6 +52,7 @@ export function usePopupController(
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<StatusMessage | null>(null);
   const refreshing = useRef(false);
+  const sessionExpired = useRef(false);
   const normalizedFilter = useMemo(() => filter.trim().toLocaleLowerCase(), [filter]);
   const openedTabIds = useMemo(() => getOpenedIdSet(history), [history]);
 
@@ -81,9 +82,14 @@ export function usePopupController(
     setStatus(null);
 
     try {
+      // A dead token gets 200-empty reads and must not create a fresh
+      // browser_groups record, so both server paths are gated on this check.
+      const session = await services.refreshSession();
+      sessionExpired.current = session === "expired";
+
       const [syncedResult, sharedDevices, openedHistory] = await Promise.all([
         services.loadSyncedDevices(),
-        services.loadSharedLinksDevices(),
+        sessionExpired.current ? Promise.resolve<Device[]>([]) : services.loadSharedLinksDevices(),
         services.loadOpenedHistory(),
       ]);
       const nextLinkDevices = sharedDevices;
@@ -98,9 +104,16 @@ export function usePopupController(
       if (syncedResult.error) {
         setStatus({ kind: "error", text: syncedResult.error });
       }
-      void services
-        .syncTabGroupsToServer()
-        .catch((error) => console.warn("Unable to sync tab groups:", error));
+      if (sessionExpired.current) {
+        setStatus({
+          kind: "error",
+          text: "Session expired — sign in again from the extension options.",
+        });
+      } else {
+        void services
+          .syncTabGroupsToServer()
+          .catch((error) => console.warn("Unable to sync tab groups:", error));
+      }
     } catch (error) {
       console.error("Unable to refresh tabs:", error);
       setStatus({ kind: "error", text: "Could not refresh tabs. Try again." });
@@ -172,10 +185,14 @@ export function usePopupController(
         await services.openTabs(tabs);
         // Keep the popup alive until the newly created/updated group has been
         // written. Closing first can terminate this page and abort the fetch.
-        try {
-          await services.syncTabGroupsToServer();
-        } catch (error) {
-          throw new OpenedTabsSyncError(error);
+        // With an expired session the write can only fail (and its GET would
+        // take the record-creation branch), so it is skipped entirely.
+        if (!sessionExpired.current) {
+          try {
+            await services.syncTabGroupsToServer();
+          } catch (error) {
+            throw new OpenedTabsSyncError(error);
+          }
         }
         closePopup();
       } catch (error) {

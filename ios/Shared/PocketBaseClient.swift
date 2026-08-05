@@ -59,6 +59,46 @@ enum PocketBaseClient {
         return try JSONDecoder().decode(AuthResponse.self, from: data).token
     }
 
+    enum SessionState {
+        case valid
+        case expired
+        case unreachable
+        case notConfigured
+    }
+
+    /// PocketBase list rules act as filters for requests whose token is dead:
+    /// reads come back 200 with empty items, never 401, so no fetch in this
+    /// app can reveal an expired session on its own (SYNC_REVIEW.md finding
+    /// #10). This explicit refresh is the only reliable check, and a
+    /// successful one rotates the stored token so regular use keeps the
+    /// session alive. Only 401/403 means expired — network failures must stay
+    /// distinguishable so offline is not treated as signed out.
+    static func refreshSession() async -> SessionState {
+        guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
+            return .notConfigured
+        }
+
+        var request = URLRequest(url: serverURL.appendingPathComponent("api/collections/users/auth-refresh"))
+        request.httpMethod = "POST"
+        request.setValue(token, forHTTPHeaderField: "Authorization")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return .unreachable }
+            guard (200..<300).contains(http.statusCode) else {
+                return http.statusCode == 401 || http.statusCode == 403 ? .expired : .unreachable
+            }
+
+            struct AuthResponse: Decodable { let token: String }
+            if let refreshed = try? JSONDecoder().decode(AuthResponse.self, from: data) {
+                SharedStore.authToken = refreshed.token
+            }
+            return .valid
+        } catch {
+            return .unreachable
+        }
+    }
+
     static func shareLink(url: String, title: String?, source: String, destination: String?) async throws {
         guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
             throw PocketBaseError.notConfigured

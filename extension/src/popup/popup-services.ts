@@ -1,3 +1,4 @@
+import { refreshSession, type SessionState } from "./auth";
 import { deleteSharedLink, loadSharedLinksDevices, syncTabGroupsToServer } from "./shared-links";
 import { loadOpenedHistory } from "./storage";
 import { loadSyncedDevices } from "./synced-devices";
@@ -11,6 +12,7 @@ export interface PopupServices {
   loadSyncedDevices(): Promise<LoadSyncedDevicesResult>;
   openOptionsPage(): void;
   openTabs(tabs: DeviceTab[]): Promise<void>;
+  refreshSession(): Promise<SessionState>;
   syncTabGroupsToServer(): Promise<void>;
 }
 
@@ -21,5 +23,6 @@ export const popupServices: PopupServices = {
   loadSyncedDevices,
   openOptionsPage: () => chrome.runtime.openOptionsPage(),
   openTabs: openTabsInBrowser,
+  refreshSession,
   syncTabGroupsToServer,
 };
