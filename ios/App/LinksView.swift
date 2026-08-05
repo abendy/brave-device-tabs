@@ -185,6 +185,8 @@ struct LinksView: View {
         let id: String
         let title: String
         let sortIndex: Int
+        /// Chrome color name of the live group; nil for iOS-created groups.
+        let color: String?
         /// nil clears the link's destination; matches `move(linkID:to:windowID:)`.
         let destination: String?
         /// Window the destination targets; nil for No group and Other groups.
@@ -242,7 +244,7 @@ struct LinksView: View {
 
     private var noGroupSection: LinkSection {
         LinkSection(
-            id: "no-group", title: Self.noGroupTitle, sortIndex: 0,
+            id: "no-group", title: Self.noGroupTitle, sortIndex: 0, color: nil,
             destination: nil, destinationWindowID: nil, links: groupedLinks.noGroup
         )
     }
@@ -250,14 +252,14 @@ struct LinksView: View {
     private var windowSections: [WindowSection] {
         let buckets = groupedLinks.byDestination
         var seenGroups = Set<String>()
-        var slots: [(windowID: Int, title: String, key: String, sortIndex: Int)] = []
+        var slots: [(windowID: Int, title: String, key: String, sortIndex: Int, color: String?)] = []
         var windowsByTitle: [String: [Int]] = [:]
 
         for group in browserGroups {
             guard let title = normalizedDestination(group.title) else { continue }
             let key = title.localizedLowercase
             guard seenGroups.insert("\(group.windowID):\(key)").inserted else { continue }
-            slots.append((group.windowID, title, key, group.index))
+            slots.append((group.windowID, title, key, group.index, group.color))
             windowsByTitle[key, default: []].append(group.windowID)
         }
 
@@ -290,6 +292,7 @@ struct LinksView: View {
                     id: "window:\(slot.windowID):group:\(slot.key)",
                     title: slot.title,
                     sortIndex: slot.sortIndex,
+                    color: slot.color,
                     destination: slot.title,
                     destinationWindowID: slot.windowID,
                     links: linksBySlot["\(slot.windowID):\(slot.key)"] ?? []
@@ -312,6 +315,7 @@ struct LinksView: View {
                             id: "window:unknown:group:\(bucket.displayTitle.localizedLowercase)",
                             title: bucket.displayTitle,
                             sortIndex: .max,
+                            color: nil,
                             destination: bucket.displayTitle,
                             destinationWindowID: nil,
                             links: bucket.links
@@ -493,6 +497,41 @@ struct LinksView: View {
     }
 }
 
+/// Approximates Chrome's tab-group palette with system colors so the dots
+/// track light/dark mode; nil for unknown names or iOS-created groups.
+private func chromeGroupColor(_ name: String?) -> Color? {
+    switch name {
+    case "grey": return Color(uiColor: .systemGray)
+    case "blue": return .blue
+    case "red": return .red
+    case "yellow": return .yellow
+    case "green": return .green
+    case "pink": return .pink
+    case "purple": return .purple
+    case "cyan": return .cyan
+    case "orange": return .orange
+    default: return nil
+    }
+}
+
+/// Chrome-style group color indicator: filled with the live group's color,
+/// hollow for iOS-created groups that have no live tab group yet.
+private struct GroupColorDot: View {
+    let colorName: String?
+
+    var body: some View {
+        if let color = chromeGroupColor(colorName) {
+            Circle()
+                .fill(color)
+                .frame(width: 10, height: 10)
+        } else {
+            Circle()
+                .strokeBorder(Color(uiColor: .separator), lineWidth: 1.5)
+                .frame(width: 10, height: 10)
+        }
+    }
+}
+
 /// Kept as non-observable reference state so starting a refresh does not
 /// invalidate the view and cancel SwiftUI's `.refreshable` task.
 private final class LinksLoadCoordinator {
@@ -590,7 +629,8 @@ private struct TabGroupDisclosure: View {
             )
             .padding(.top, 8)
         } label: {
-            HStack {
+            HStack(spacing: 8) {
+                GroupColorDot(colorName: group.color)
                 Text(group.title)
                     .font(.subheadline.weight(.semibold))
                 Spacer()

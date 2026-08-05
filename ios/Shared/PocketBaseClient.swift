@@ -56,11 +56,15 @@ struct BrowserGroup: Decodable, Equatable {
     let title: String
     let windowID: Int
     let index: Int
+    /// Chrome tab-group color name ("blue", "grey", …) as synced by the
+    /// extension; nil on records from older builds.
+    let color: String?
 
     private enum CodingKeys: String, CodingKey {
         case title
         case windowID = "windowId"
         case index
+        case color
     }
 
     init(from decoder: Decoder) throws {
@@ -69,6 +73,7 @@ struct BrowserGroup: Decodable, Equatable {
         // Records written by older extension builds did not include windowId.
         windowID = try container.decodeIfPresent(Int.self, forKey: .windowID) ?? -1
         index = try container.decodeIfPresent(Int.self, forKey: .index) ?? .max
+        color = try container.decodeIfPresent(String.self, forKey: .color)
     }
 }
 
