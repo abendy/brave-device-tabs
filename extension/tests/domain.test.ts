@@ -51,12 +51,14 @@ describe("popup domain", () => {
     const tab = sharedTab("one", "Research");
     const groups = [{ id: 9, title: " research ", windowId: 12 }] as chrome.tabGroups.TabGroup[];
 
-    expect(resolveTabDestination(tab, 3, groups)).toEqual({
+    expect(resolveTabDestination(tab, 3, groups, new Set([3, 12]))).toEqual({
       groupId: 9,
       newGroupTitle: null,
       windowId: 12,
     });
-    expect(resolveTabDestination({ ...tab, destination: "Missing" }, 3, groups)).toEqual({
+    expect(
+      resolveTabDestination({ ...tab, destination: "Missing" }, 3, groups, new Set([3, 12])),
+    ).toEqual({
       groupId: null,
       newGroupTitle: "Missing",
       windowId: 3,
@@ -66,11 +68,60 @@ describe("popup domain", () => {
   it("reports no new group needed when a tab has no destination", () => {
     const tab = sharedTab("one", null);
 
-    expect(resolveTabDestination(tab, 3, [])).toEqual({
+    expect(resolveTabDestination(tab, 3, [], new Set([3]))).toEqual({
       groupId: null,
       newGroupTitle: null,
       windowId: 3,
     });
+  });
+
+  it("prefers the destination window's copy of a duplicated group title", () => {
+    const tab = sharedTab("one", "Research", 30);
+    const groups = [
+      { id: 9, title: "Research", windowId: 12 },
+      { id: 10, title: "Research", windowId: 30 },
+    ] as chrome.tabGroups.TabGroup[];
+
+    expect(resolveTabDestination(tab, 3, groups, new Set([3, 12, 30]))).toEqual({
+      groupId: 10,
+      newGroupTitle: null,
+      windowId: 30,
+    });
+  });
+
+  it("creates a new group in the targeted window when it has no matching group", () => {
+    const tab = sharedTab("one", "Fresh", 30);
+
+    expect(resolveTabDestination(tab, 3, [], new Set([3, 30]))).toEqual({
+      groupId: null,
+      newGroupTitle: "Fresh",
+      windowId: 30,
+    });
+  });
+
+  it("falls back to title-only routing when the targeted window is gone", () => {
+    const groups = [{ id: 9, title: "Research", windowId: 12 }] as chrome.tabGroups.TabGroup[];
+
+    expect(
+      resolveTabDestination(sharedTab("one", "Research", 99), 3, groups, new Set([3, 12])),
+    ).toEqual({
+      groupId: 9,
+      newGroupTitle: null,
+      windowId: 12,
+    });
+    expect(
+      resolveTabDestination(sharedTab("two", "Fresh", 99), 3, groups, new Set([3, 12])),
+    ).toEqual({
+      groupId: null,
+      newGroupTitle: "Fresh",
+      windowId: 3,
+    });
+  });
+
+  it("keeps a stored destination window id only when it is a positive number", () => {
+    expect(sharedTab("one", "Research", 7).destinationWindowId).toBe(7);
+    expect(sharedTab("two", "Research", 0).destinationWindowId).toBeUndefined();
+    expect(sharedTab("three", "Research").destinationWindowId).toBeUndefined();
   });
 
   it("formats invalid and same-day history times", () => {
@@ -80,9 +131,10 @@ describe("popup domain", () => {
   });
 });
 
-function sharedTab(id: string, destination: string | null): DeviceTab {
+function sharedTab(id: string, destination: string | null, windowId?: number): DeviceTab {
   return normalizeSharedLink({
     ...(destination ? { destination } : {}),
+    ...(windowId === undefined ? {} : { destinationWindowId: windowId }),
     id,
     source: "iPhone",
     title: `Link ${id}`,

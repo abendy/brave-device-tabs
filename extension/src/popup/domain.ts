@@ -4,6 +4,7 @@ const OPENABLE_PROTOCOLS = new Set(["file:", "ftp:", "http:", "https:"]);
 
 export interface SharedLinkRecord {
   destination?: string;
+  destinationWindowId?: number;
   id: string;
   source?: string;
   title?: string;
@@ -61,9 +62,12 @@ function normalizeTab(tab: chrome.tabs.Tab, deviceName: string, tabIndex: number
 export function normalizeSharedLink(record: SharedLinkRecord): DeviceTab {
   const title = record.title?.trim() || readableUrl(record.url) || "Untitled link";
   const source = record.source || "Shared Links";
+  // PocketBase number fields read back 0 when unset.
+  const windowId = record.destinationWindowId;
 
   return {
     destination: record.destination?.trim() || null,
+    ...(windowId && windowId > 0 ? { destinationWindowId: windowId } : {}),
     id: `shared:${record.id}`,
     searchable: `shared links ${source} ${title} ${record.url}`.toLocaleLowerCase(),
     source,
@@ -122,6 +126,7 @@ export function resolveTabDestination(
   tab: DeviceTab,
   defaultWindowId: number,
   liveGroups: chrome.tabGroups.TabGroup[],
+  liveWindowIds: ReadonlySet<number>,
 ): TabDestination {
   if (!tab.destination) {
     return { groupId: null, newGroupTitle: null, windowId: defaultWindowId };
@@ -129,7 +134,24 @@ export function resolveTabDestination(
 
   const trimmedDestination = tab.destination.trim();
   const target = trimmedDestination.toLocaleLowerCase();
-  const match = liveGroups.find((group) => group.title?.trim().toLocaleLowerCase() === target);
+  const matchesTitle = (group: chrome.tabGroups.TabGroup) =>
+    group.title?.trim().toLocaleLowerCase() === target;
+
+  const requestedWindowId = tab.destinationWindowId;
+  if (requestedWindowId !== undefined) {
+    const exact = liveGroups.find(
+      (group) => group.windowId === requestedWindowId && matchesTitle(group),
+    );
+    if (exact) {
+      return { groupId: exact.id, newGroupTitle: null, windowId: exact.windowId };
+    }
+    if (liveWindowIds.has(requestedWindowId)) {
+      return { groupId: null, newGroupTitle: trimmedDestination, windowId: requestedWindowId };
+    }
+    // The targeted window is gone; fall back to title-only routing below.
+  }
+
+  const match = liveGroups.find(matchesTitle);
   return match
     ? { groupId: match.id, newGroupTitle: null, windowId: match.windowId }
     : { groupId: null, newGroupTitle: trimmedDestination, windowId: defaultWindowId };

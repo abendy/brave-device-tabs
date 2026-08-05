@@ -25,6 +25,7 @@ describe("openTabsInBrowser", () => {
       },
       tabs: { create, group, update: updateTab },
       windows: {
+        getAll: vi.fn(async () => [{ id: 1 }, { id: 2 }]),
         getCurrent: vi.fn((_options, callback) => callback({ id: 1 })),
         update: updateWindow,
       },
@@ -91,6 +92,32 @@ describe("openTabsInBrowser", () => {
     expect(updateGroup).toHaveBeenCalledWith(55, { title: "Reading List" });
   });
 
+  it("creates a targeted new group in its destination window, separate from an identically titled one", async () => {
+    create.mockReset();
+    create.mockResolvedValueOnce({ id: 21 }).mockResolvedValueOnce({ id: 22 });
+    group.mockResolvedValueOnce(55).mockResolvedValueOnce(56);
+
+    await openTabsInBrowser([
+      tab("shared:one", "Reading List", 2),
+      tab("shared:two", "Reading List"),
+    ]);
+
+    expect(create).toHaveBeenNthCalledWith(1, {
+      active: false,
+      url: "https://shared-one.test",
+      windowId: 2,
+    });
+    expect(create).toHaveBeenNthCalledWith(2, {
+      active: false,
+      url: "https://shared-two.test",
+      windowId: 1,
+    });
+    expect(group).toHaveBeenNthCalledWith(1, { tabIds: [21] });
+    expect(group).toHaveBeenNthCalledWith(2, { tabIds: [22] });
+    expect(updateGroup).toHaveBeenNthCalledWith(1, 55, { title: "Reading List" });
+    expect(updateGroup).toHaveBeenNthCalledWith(2, 56, { title: "Reading List" });
+  });
+
   it("leaves tabs without a destination ungrouped", async () => {
     create.mockReset();
     create.mockResolvedValueOnce({ id: 21 });
@@ -102,9 +129,10 @@ describe("openTabsInBrowser", () => {
   });
 });
 
-function tab(id: string, destination: string | null): DeviceTab {
+function tab(id: string, destination: string | null, destinationWindowId?: number): DeviceTab {
   return {
     destination,
+    ...(destinationWindowId === undefined ? {} : { destinationWindowId }),
     id,
     searchable: id,
     source: "Phone",

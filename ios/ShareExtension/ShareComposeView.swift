@@ -24,25 +24,36 @@ struct ShareComposeView: View {
                     Section("Destination") {
                         Picker(selection: $model.selectedDestination) {
                             Text("No group").tag(ShareComposeModel.Destination.none)
-                            Text("New group…").tag(ShareComposeModel.Destination.new)
+                            Text("New group…").tag(ShareComposeModel.Destination.new(windowID: nil))
                             if !model.pendingGroups.isEmpty {
                                 Divider()
-                                ForEach(model.pendingGroups, id: \.self) { group in
-                                    Text(group).tag(ShareComposeModel.Destination.existing(group))
+                                ForEach(model.pendingGroups, id: \.self) { option in
+                                    Text(option.title).tag(
+                                        ShareComposeModel.Destination.existing(
+                                            title: option.title, windowID: option.windowID
+                                        )
+                                    )
                                 }
                             }
-                            ForEach(model.windowGroups.indices, id: \.self) { windowIndex in
+                            ForEach(model.windowGroups, id: \.windowID) { cluster in
                                 Divider()
-                                ForEach(model.windowGroups[windowIndex], id: \.self) { group in
-                                    Text(group).tag(ShareComposeModel.Destination.existing(group))
+                                ForEach(cluster.groups, id: \.self) { group in
+                                    Text(group).tag(
+                                        ShareComposeModel.Destination.existing(
+                                            title: group, windowID: cluster.windowID
+                                        )
+                                    )
                                 }
+                                Text("New group here…").tag(
+                                    ShareComposeModel.Destination.new(windowID: cluster.windowID)
+                                )
                             }
                         } label: {
                             Text("Destination")
                         }
                         .pickerStyle(.menu)
 
-                        if model.selectedDestination == .new {
+                        if case .new = model.selectedDestination {
                             TextField("Group name", text: $model.newGroupName)
                         }
                     }

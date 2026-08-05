@@ -1,5 +1,7 @@
 export interface DeviceTab {
   destination: string | null;
+  /** Window the destination targets; only shared links with a stored positive value carry it. */
+  destinationWindowId?: number;
   id: string;
   searchable: string;
   source: string;

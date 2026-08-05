@@ -120,6 +120,7 @@ struct LinksView: View {
                         GroupDropTarget(
                             sectionID: noGroupSection.id,
                             destination: noGroupSection.destination,
+                            destinationWindowID: noGroupSection.destinationWindowID,
                             links: noGroupSection.links,
                             dragContext: $dragContext,
                             onDrop: move,
@@ -179,8 +180,10 @@ struct LinksView: View {
         let id: String
         let title: String
         let sortIndex: Int
-        /// nil clears the link's destination; matches `move(linkID:to:)`.
+        /// nil clears the link's destination; matches `move(linkID:to:windowID:)`.
         let destination: String?
+        /// Window the destination targets; nil for No group and Other groups.
+        let destinationWindowID: Int?
         let links: [SharedLink]
     }
 
@@ -201,14 +204,25 @@ struct LinksView: View {
         return trimmed
     }
 
+    private struct DestinationBucket {
+        var displayTitle: String
+        var links: [SharedLink]
+    }
+
     /// Links staged into the New Group card render only there, not in their
-    /// old section, until they're saved (or unstaged).
-    private var groupedLinks: (byDestination: [String: [SharedLink]], noGroup: [SharedLink]) {
-        var byDestination: [String: [SharedLink]] = [:]
+    /// old section, until they're saved (or unstaged). Buckets are keyed by
+    /// lowercased title so differently-cased destinations merge — matching
+    /// how the extension resolves them — with the first link's casing kept
+    /// for display.
+    private var groupedLinks: (byDestination: [String: DestinationBucket], noGroup: [SharedLink]) {
+        var byDestination: [String: DestinationBucket] = [:]
         var noGroup: [SharedLink] = []
         for link in links where !stagedLinkIDs.contains(link.id) {
             if let destination = normalizedDestination(link.destination) {
-                byDestination[destination, default: []].append(link)
+                let key = destination.localizedLowercase
+                var bucket = byDestination[key] ?? DestinationBucket(displayTitle: destination, links: [])
+                bucket.links.append(link)
+                byDestination[key] = bucket
             } else {
                 noGroup.append(link)
             }
@@ -224,49 +238,78 @@ struct LinksView: View {
     private var noGroupSection: LinkSection {
         LinkSection(
             id: "no-group", title: Self.noGroupTitle, sortIndex: 0,
-            destination: nil, links: groupedLinks.noGroup
+            destination: nil, destinationWindowID: nil, links: groupedLinks.noGroup
         )
     }
 
     private var windowSections: [WindowSection] {
-        let linksByDestination = groupedLinks.byDestination
+        let buckets = groupedLinks.byDestination
         var seenGroups = Set<String>()
-        var claimedDestinations = Set<String>()
-        var groupsByWindow: [Int: [LinkSection]] = [:]
+        var slots: [(windowID: Int, title: String, key: String, sortIndex: Int)] = []
+        var windowsByTitle: [String: [Int]] = [:]
 
         for group in browserGroups {
             guard let title = normalizedDestination(group.title) else { continue }
-            let groupKey = "\(group.windowID):\(title)"
-            guard seenGroups.insert(groupKey).inserted else { continue }
-            let isDestinationOwner = claimedDestinations.insert(title).inserted
-            groupsByWindow[group.windowID, default: []].append(
+            let key = title.localizedLowercase
+            guard seenGroups.insert("\(group.windowID):\(key)").inserted else { continue }
+            slots.append((group.windowID, title, key, group.index))
+            windowsByTitle[key, default: []].append(group.windowID)
+        }
+
+        // A link carrying a window id lands in that window's copy of its
+        // group when it is live, so same-titled groups in two windows each
+        // show their own links. Windowless (or stale-window) links go to the
+        // title's first-encountered window, as before.
+        var linksBySlot: [String: [SharedLink]] = [:]
+        var unknownBuckets: [DestinationBucket] = []
+        for (key, bucket) in buckets {
+            guard let windows = windowsByTitle[key] else {
+                unknownBuckets.append(bucket)
+                continue
+            }
+            for link in bucket.links {
+                let windowID: Int
+                if let linkWindow = link.destinationWindowID, windows.contains(linkWindow) {
+                    windowID = linkWindow
+                } else {
+                    windowID = windows[0]
+                }
+                linksBySlot["\(windowID):\(key)", default: []].append(link)
+            }
+        }
+
+        var groupsByWindow: [Int: [LinkSection]] = [:]
+        for slot in slots {
+            groupsByWindow[slot.windowID, default: []].append(
                 LinkSection(
-                    id: "window:\(group.windowID):group:\(title)",
-                    title: title,
-                    sortIndex: group.index,
-                    destination: title,
-                    links: isDestinationOwner ? linksByDestination[title] ?? [] : []
+                    id: "window:\(slot.windowID):group:\(slot.key)",
+                    title: slot.title,
+                    sortIndex: slot.sortIndex,
+                    destination: slot.title,
+                    destinationWindowID: slot.windowID,
+                    links: linksBySlot["\(slot.windowID):\(slot.key)"] ?? []
                 )
             )
         }
 
         var windows: [WindowSection] = []
 
-        let unknownDestinations = linksByDestination.keys.filter { !claimedDestinations.contains($0) }.sorted {
-            $0.localizedStandardCompare($1) == .orderedAscending
+        let unknown = unknownBuckets.sorted {
+            $0.displayTitle.localizedStandardCompare($1.displayTitle) == .orderedAscending
         }
-        if !unknownDestinations.isEmpty {
+        if !unknown.isEmpty {
             windows.append(
                 WindowSection(
                     id: "window:unknown",
                     title: "Other groups",
-                    groups: unknownDestinations.map { title in
+                    groups: unknown.map { bucket in
                         LinkSection(
-                            id: "window:unknown:group:\(title)",
-                            title: title,
+                            id: "window:unknown:group:\(bucket.displayTitle.localizedLowercase)",
+                            title: bucket.displayTitle,
                             sortIndex: .max,
-                            destination: title,
-                            links: linksByDestination[title] ?? []
+                            destination: bucket.displayTitle,
+                            destinationWindowID: nil,
+                            links: bucket.links
                         )
                     }
                 )
@@ -288,25 +331,31 @@ struct LinksView: View {
         return windows
     }
 
-    private func move(linkID: String, to destination: String?) {
+    private func move(linkID: String, to destination: String?, windowID: Int?) {
         guard let index = links.firstIndex(where: { $0.id == linkID }) else { return }
         let link = links[index]
-        guard normalizedDestination(link.destination) != normalizedDestination(destination) else { return }
+        let sameTitle = normalizedDestination(link.destination)?.localizedLowercase
+            == normalizedDestination(destination)?.localizedLowercase
+        guard !(sameTitle && link.destinationWindowID == windowID) else { return }
 
         let previousDestination = link.destination
+        let previousWindowID = link.destinationWindowID
         links[index] = SharedLink(
-            id: link.id, url: link.url, title: link.title, source: link.source, destination: destination
+            id: link.id, url: link.url, title: link.title, source: link.source,
+            destination: destination, destinationWindowID: windowID
         )
 
         Task {
             do {
-                try await PocketBaseClient.updateLinkDestination(id: linkID, destination: destination)
+                try await PocketBaseClient.updateLinkDestination(
+                    id: linkID, destination: destination, windowID: windowID
+                )
             } catch {
                 if let rollbackIndex = links.firstIndex(where: { $0.id == linkID }) {
                     let current = links[rollbackIndex]
                     links[rollbackIndex] = SharedLink(
                         id: current.id, url: current.url, title: current.title, source: current.source,
-                        destination: previousDestination
+                        destination: previousDestination, destinationWindowID: previousWindowID
                     )
                 }
                 moveErrorMessage = error.localizedDescription
@@ -327,7 +376,7 @@ struct LinksView: View {
         guard !trimmedName.isEmpty else { return }
 
         for linkID in stagedLinkIDs {
-            move(linkID: linkID, to: trimmedName)
+            move(linkID: linkID, to: trimmedName, windowID: nil)
         }
         stagedLinkIDs.removeAll()
         newGroupName = ""
@@ -438,7 +487,7 @@ private final class LinksLoadCoordinator {
 private struct WindowGroupDisclosure: View {
     let window: LinksView.WindowSection
     @Binding var dragContext: LinkDragContext?
-    let onDrop: (_ linkID: String, _ destination: String?) -> Void
+    let onDrop: (_ linkID: String, _ destination: String?, _ windowID: Int?) -> Void
     let onDelete: (_ linkID: String) -> Void
 
     @State private var isExpanded = true
@@ -481,7 +530,7 @@ private struct WindowGroupDisclosure: View {
 private struct TabGroupDisclosure: View {
     let group: LinksView.LinkSection
     @Binding var dragContext: LinkDragContext?
-    let onDrop: (_ linkID: String, _ destination: String?) -> Void
+    let onDrop: (_ linkID: String, _ destination: String?, _ windowID: Int?) -> Void
     let onDelete: (_ linkID: String) -> Void
 
     @State private var isExpanded = false
@@ -492,6 +541,7 @@ private struct TabGroupDisclosure: View {
             GroupDropTarget(
                 sectionID: group.id,
                 destination: group.destination,
+                destinationWindowID: group.destinationWindowID,
                 links: group.links,
                 dragContext: $dragContext,
                 onDrop: onDrop,
@@ -519,6 +569,7 @@ private struct TabGroupDisclosure: View {
                 delegate: LinkDropDelegate(
                     sectionID: group.id,
                     destination: group.destination,
+                    destinationWindowID: group.destinationWindowID,
                     dragContext: $dragContext,
                     isTargeted: $isTargeted,
                     onDrop: onDrop
@@ -540,9 +591,10 @@ private struct LinkDragContext {
 private struct GroupDropTarget: View {
     let sectionID: String
     let destination: String?
+    let destinationWindowID: Int?
     let links: [SharedLink]
     @Binding var dragContext: LinkDragContext?
-    let onDrop: (_ linkID: String, _ destination: String?) -> Void
+    let onDrop: (_ linkID: String, _ destination: String?, _ windowID: Int?) -> Void
     let onDelete: (_ linkID: String) -> Void
 
     @State private var isTargeted = false
@@ -572,6 +624,7 @@ private struct GroupDropTarget: View {
             delegate: LinkDropDelegate(
                 sectionID: sectionID,
                 destination: destination,
+                destinationWindowID: destinationWindowID,
                 dragContext: $dragContext,
                 isTargeted: $isTargeted,
                 onDrop: onDrop
@@ -664,9 +717,10 @@ private struct NewGroupDropTarget: View {
             delegate: LinkDropDelegate(
                 sectionID: sectionID,
                 destination: nil,
+                destinationWindowID: nil,
                 dragContext: $dragContext,
                 isTargeted: $isTargeted,
-                onDrop: { linkID, _ in onStage(linkID) }
+                onDrop: { linkID, _, _ in onStage(linkID) }
             )
         )
     }
@@ -799,9 +853,10 @@ private struct DropReadyView: View {
 private struct LinkDropDelegate: DropDelegate {
     let sectionID: String
     let destination: String?
+    let destinationWindowID: Int?
     @Binding var dragContext: LinkDragContext?
     @Binding var isTargeted: Bool
-    let onDrop: (_ linkID: String, _ destination: String?) -> Void
+    let onDrop: (_ linkID: String, _ destination: String?, _ windowID: Int?) -> Void
 
     func validateDrop(info: DropInfo) -> Bool {
         guard info.hasItemsConforming(to: [.plainText]), let dragContext else { return false }
@@ -832,7 +887,7 @@ private struct LinkDropDelegate: DropDelegate {
         else { return false }
 
         self.dragContext = nil
-        onDrop(dragContext.linkID, destination)
+        onDrop(dragContext.linkID, destination, destinationWindowID)
         return true
     }
 }

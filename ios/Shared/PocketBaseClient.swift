@@ -20,6 +20,36 @@ struct SharedLink: Identifiable, Decodable, Equatable {
     let title: String?
     let source: String?
     let destination: String?
+    let destinationWindowID: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, url, title, source, destination
+        case destinationWindowID = "destinationWindowId"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        url = try container.decode(String.self, forKey: .url)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        source = try container.decodeIfPresent(String.self, forKey: .source)
+        destination = try container.decodeIfPresent(String.self, forKey: .destination)
+        // PocketBase number fields read back 0 when unset.
+        let windowID = try container.decodeIfPresent(Int.self, forKey: .destinationWindowID) ?? 0
+        destinationWindowID = windowID > 0 ? windowID : nil
+    }
+
+    init(
+        id: String, url: String, title: String?, source: String?,
+        destination: String?, destinationWindowID: Int?
+    ) {
+        self.id = id
+        self.url = url
+        self.title = title
+        self.source = source
+        self.destination = destination
+        self.destinationWindowID = destinationWindowID
+    }
 }
 
 struct BrowserGroup: Decodable, Equatable {
@@ -99,7 +129,10 @@ enum PocketBaseClient {
         }
     }
 
-    static func shareLink(url: String, title: String?, source: String, destination: String?) async throws {
+    static func shareLink(
+        url: String, title: String?, source: String,
+        destination: String?, destinationWindowID: Int? = nil
+    ) async throws {
         guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
             throw PocketBaseError.notConfigured
         }
@@ -109,10 +142,20 @@ enum PocketBaseClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(token, forHTTPHeaderField: "Authorization")
 
-        var body: [String: String] = ["url": url, "source": source]
-        if let title, !title.isEmpty { body["title"] = title }
-        if let destination, !destination.isEmpty { body["destination"] = destination }
-        request.httpBody = try JSONEncoder().encode(body)
+        struct Payload: Encodable {
+            let url: String
+            let source: String
+            let title: String?
+            let destination: String?
+            let destinationWindowId: Int?
+        }
+        request.httpBody = try JSONEncoder().encode(Payload(
+            url: url,
+            source: source,
+            title: (title?.isEmpty == false) ? title : nil,
+            destination: (destination?.isEmpty == false) ? destination : nil,
+            destinationWindowId: (destination?.isEmpty == false) ? destinationWindowID : nil
+        ))
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw PocketBaseError.invalidResponse }
@@ -150,8 +193,9 @@ enum PocketBaseClient {
     }
 
     /// Empty string clears the destination, matching how the extension
-    /// treats an empty `destination` as "no group" throughout.
-    static func updateLinkDestination(id: String, destination: String?) async throws {
+    /// treats an empty `destination` as "no group" throughout; 0 clears the
+    /// window preference the same way.
+    static func updateLinkDestination(id: String, destination: String?, windowID: Int? = nil) async throws {
         guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
             throw PocketBaseError.notConfigured
         }
@@ -162,7 +206,14 @@ enum PocketBaseClient {
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(token, forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONEncoder().encode(["destination": destination ?? ""])
+        struct Payload: Encodable {
+            let destination: String
+            let destinationWindowId: Int
+        }
+        request.httpBody = try JSONEncoder().encode(Payload(
+            destination: destination ?? "",
+            destinationWindowId: windowID ?? 0
+        ))
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw PocketBaseError.invalidResponse }
@@ -213,18 +264,23 @@ enum PocketBaseClient {
         return list.items.first?.groups ?? []
     }
 
+    struct KnownDestination: Equatable {
+        let title: String
+        let windowID: Int?
+    }
+
     /// Best-effort — a failure here must never block sharing. Covers group
     /// names created purely on iOS (via LinksView's New Group card or a prior
     /// "New group…" share) that have never synced back as a live browser tab
     /// group, so `fetchBrowserGroups` alone wouldn't offer them.
-    static func fetchKnownDestinations(serverURL: URL, token: String) async -> [String] {
+    static func fetchKnownDestinations(serverURL: URL, token: String) async -> [KnownDestination] {
         guard var components = URLComponents(
             url: serverURL.appendingPathComponent("api/collections/shared_links/records"),
             resolvingAgainstBaseURL: false
         ) else { return [] }
         components.queryItems = [
             URLQueryItem(name: "filter", value: "(opened=false)"),
-            URLQueryItem(name: "fields", value: "destination"),
+            URLQueryItem(name: "fields", value: "destination,destinationWindowId"),
             URLQueryItem(name: "perPage", value: "200"),
         ]
         guard let url = components.url else { return [] }
@@ -236,12 +292,21 @@ enum PocketBaseClient {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return [] }
 
-            struct Record: Decodable { let destination: String? }
+            struct Record: Decodable {
+                let destination: String?
+                let destinationWindowId: Int?
+            }
             struct ListResponse: Decodable { let items: [Record] }
 
             let items = try JSONDecoder().decode(ListResponse.self, from: data).items
-            return items.compactMap { $0.destination?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
+            return items.compactMap { record -> KnownDestination? in
+                guard
+                    let title = record.destination?.trimmingCharacters(in: .whitespacesAndNewlines),
+                    !title.isEmpty
+                else { return nil }
+                let windowID = record.destinationWindowId ?? 0
+                return KnownDestination(title: title, windowID: windowID > 0 ? windowID : nil)
+            }
         } catch {
             return []
         }

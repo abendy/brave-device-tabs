@@ -8,8 +8,18 @@ import UIKit
 final class ShareComposeModel: ObservableObject {
     enum Destination: Hashable {
         case none
-        case existing(String)
-        case new
+        case existing(title: String, windowID: Int?)
+        case new(windowID: Int?)
+    }
+
+    struct DestinationOption: Hashable {
+        let title: String
+        let windowID: Int?
+    }
+
+    struct WindowGroupCluster: Hashable {
+        let windowID: Int
+        let groups: [String]
     }
 
     @Published var sharedURL: URL?
@@ -17,10 +27,10 @@ final class ShareComposeModel: ObservableObject {
     /// iOS-created destinations with no live browser tab group yet — the
     /// Links screen's "Other groups". They lead the menu because a group just
     /// created from iOS is the most likely pick when saving more links to it.
-    @Published var pendingGroups: [String] = []
-    /// Live browser tab groups, one array per window, in the Links screen's
+    @Published var pendingGroups: [DestinationOption] = []
+    /// Live browser tab groups clustered per window, in the Links screen's
     /// window and in-window order.
-    @Published var windowGroups: [[String]] = []
+    @Published var windowGroups: [WindowGroupCluster] = []
     @Published var selectedDestination: Destination = .none
     @Published var newGroupName: String = ""
     @Published var isPosting = false
@@ -55,7 +65,8 @@ final class ShareComposeModel: ObservableObject {
                     url: sharedURL.absoluteString,
                     title: note.isEmpty ? nil : note,
                     source: UIDevice.current.name,
-                    destination: destination
+                    destination: destination.title,
+                    destinationWindowID: destination.windowID
                 )
                 await MainActor.run {
                     self.isPosting = false
@@ -74,13 +85,15 @@ final class ShareComposeModel: ObservableObject {
         onCancel?()
     }
 
-    private func resolvedDestination() -> String? {
+    private func resolvedDestination() -> (title: String?, windowID: Int?) {
         switch selectedDestination {
-        case .none: return nil
-        case .existing(let group): return group
-        case .new:
+        case .none:
+            return (nil, nil)
+        case .existing(let title, let windowID):
+            return (title, windowID)
+        case .new(let windowID):
             let trimmed = newGroupName.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
+            return trimmed.isEmpty ? (nil, nil) : (trimmed, windowID)
         }
     }
 }
