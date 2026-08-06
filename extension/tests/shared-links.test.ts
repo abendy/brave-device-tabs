@@ -222,7 +222,6 @@ describe("markSharedLinksOpened", () => {
     fetchMock
       .mockResolvedValueOnce({ ok: false, status: 404 })
       .mockResolvedValueOnce({
-        json: async () => ({ data: { id: { code: "validation_not_unique" } } }),
         ok: false,
         status: 400,
       })
@@ -252,11 +251,14 @@ describe("markSharedLinksOpened", () => {
   });
 
   it("rejects when creating the first tab group snapshot fails", async () => {
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 404 }).mockResolvedValueOnce({
-      json: async () => ({ message: "The request was rejected." }),
-      ok: false,
-      status: 403,
-    });
+    fetchMock
+      .mockResolvedValueOnce({ ok: false, status: 404 })
+      .mockResolvedValueOnce({
+        json: async () => ({ message: "The request was rejected." }),
+        ok: false,
+        status: 403,
+      })
+      .mockResolvedValueOnce({ ok: false, status: 404 });
 
     await expect(syncTabGroupsToServer()).rejects.toThrow(
       "Syncing tab groups failed (403). The request was rejected.",
@@ -268,6 +270,11 @@ describe("markSharedLinksOpened", () => {
         body: JSON.stringify({ groups: [], id: BROWSER_GROUPS_RECORD_ID }),
         method: "POST",
       }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      `https://pocketbase.test/api/collections/browser_groups/records/${BROWSER_GROUPS_RECORD_ID}`,
+      expect.objectContaining({ headers: { Authorization: "token" } }),
     );
   });
 });
