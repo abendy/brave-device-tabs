@@ -77,7 +77,23 @@ struct BrowserGroup: Decodable, Equatable {
     }
 }
 
+private struct PocketBaseListResponse<Item: Decodable>: Decodable {
+    let page: Int
+    let perPage: Int
+    let totalItems: Int
+    let totalPages: Int
+    let items: [Item]
+}
+
+private struct KnownDestinationRecord: Decodable {
+    let destination: String?
+    let destinationWindowId: Int?
+}
+
 enum PocketBaseClient {
+    private static let sharedLinksPageSize = 200
+    private static let sharedLinksMaxPages = 20
+
     static func login(serverURL: URL, email: String, password: String) async throws -> String {
         var request = URLRequest(url: serverURL.appendingPathComponent("api/collections/users/auth-with-password"))
         request.httpMethod = "POST"
@@ -177,24 +193,36 @@ enum PocketBaseClient {
             url: serverURL.appendingPathComponent("api/collections/shared_links/records"),
             resolvingAgainstBaseURL: false
         ) else { throw PocketBaseError.invalidResponse }
-        components.queryItems = [
-            URLQueryItem(name: "filter", value: "(opened=false)"),
-            URLQueryItem(name: "sort", value: "-created"),
-        ]
-        guard let url = components.url else { throw PocketBaseError.invalidResponse }
+        var page = 1
+        var totalPages = 1
+        var links: [SharedLink] = []
 
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
-        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        request.setValue(token, forHTTPHeaderField: "Authorization")
+        while page <= totalPages && page <= sharedLinksMaxPages {
+            components.queryItems = [
+                URLQueryItem(name: "filter", value: "(opened=false)"),
+                URLQueryItem(name: "sort", value: "-created"),
+                URLQueryItem(name: "perPage", value: String(sharedLinksPageSize)),
+                URLQueryItem(name: "page", value: String(page)),
+            ]
+            guard let url = components.url else { throw PocketBaseError.invalidResponse }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw PocketBaseError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else {
-            throw PocketBaseError.server(errorMessage(from: data) ?? "Could not load links (\(http.statusCode)).")
+            var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+            request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+            request.setValue(token, forHTTPHeaderField: "Authorization")
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw PocketBaseError.invalidResponse }
+            guard (200..<300).contains(http.statusCode) else {
+                throw PocketBaseError.server(errorMessage(from: data) ?? "Could not load links (\(http.statusCode)).")
+            }
+
+            let list = try JSONDecoder().decode(PocketBaseListResponse<SharedLink>.self, from: data)
+            links.append(contentsOf: list.items)
+            totalPages = list.totalPages
+            page += 1
         }
 
-        struct ListResponse: Decodable { let items: [SharedLink] }
-        return try JSONDecoder().decode(ListResponse.self, from: data).items
+        return links
     }
 
     /// Empty string clears the destination, matching how the extension
@@ -283,37 +311,47 @@ enum PocketBaseClient {
             url: serverURL.appendingPathComponent("api/collections/shared_links/records"),
             resolvingAgainstBaseURL: false
         ) else { return [] }
-        components.queryItems = [
-            URLQueryItem(name: "filter", value: "(opened=false)"),
-            URLQueryItem(name: "fields", value: "destination,destinationWindowId"),
-            URLQueryItem(name: "perPage", value: "200"),
-        ]
-        guard let url = components.url else { return [] }
-
-        var request = URLRequest(url: url)
-        request.setValue(token, forHTTPHeaderField: "Authorization")
+        var page = 1
+        var totalPages = 1
+        var records: [KnownDestinationRecord] = []
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return [] }
+            while page <= totalPages && page <= sharedLinksMaxPages {
+                components.queryItems = [
+                    URLQueryItem(name: "filter", value: "(opened=false)"),
+                    URLQueryItem(name: "fields", value: "destination,destinationWindowId"),
+                    URLQueryItem(name: "perPage", value: String(sharedLinksPageSize)),
+                    URLQueryItem(name: "page", value: String(page)),
+                ]
+                guard let url = components.url else { throw PocketBaseError.invalidResponse }
 
-            struct Record: Decodable {
-                let destination: String?
-                let destinationWindowId: Int?
-            }
-            struct ListResponse: Decodable { let items: [Record] }
+                var request = URLRequest(url: url)
+                request.setValue(token, forHTTPHeaderField: "Authorization")
 
-            let items = try JSONDecoder().decode(ListResponse.self, from: data).items
-            return items.compactMap { record -> KnownDestination? in
-                guard
-                    let title = record.destination?.trimmingCharacters(in: .whitespacesAndNewlines),
-                    !title.isEmpty
-                else { return nil }
-                let windowID = record.destinationWindowId ?? 0
-                return KnownDestination(title: title, windowID: windowID > 0 ? windowID : nil)
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse else { throw PocketBaseError.invalidResponse }
+                guard (200..<300).contains(http.statusCode) else {
+                    throw PocketBaseError.server(
+                        errorMessage(from: data) ?? "Could not load known destinations (\(http.statusCode))."
+                    )
+                }
+
+                let list = try JSONDecoder().decode(PocketBaseListResponse<KnownDestinationRecord>.self, from: data)
+                records.append(contentsOf: list.items)
+                totalPages = list.totalPages
+                page += 1
             }
         } catch {
-            return []
+            // Keep successfully decoded pages when a later page fails; this is best-effort.
+        }
+
+        return records.compactMap { record -> KnownDestination? in
+            guard
+                let title = record.destination?.trimmingCharacters(in: .whitespacesAndNewlines),
+                !title.isEmpty
+            else { return nil }
+            let windowID = record.destinationWindowId ?? 0
+            return KnownDestination(title: title, windowID: windowID > 0 ? windowID : nil)
         }
     }
 

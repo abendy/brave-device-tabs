@@ -8,8 +8,14 @@ import { readServerConfig } from "./storage";
 import type { Device, DeviceTab } from "./types";
 
 interface ListResponse<Item> {
+  page?: number;
+  perPage?: number;
+  totalItems?: number;
+  totalPages?: number;
   items?: Item[];
 }
+
+const MAX_SHARED_LINK_PAGES = 20;
 
 export const BROWSER_GROUPS_RECORD_ID = "browsergroups01";
 
@@ -20,16 +26,31 @@ export async function loadSharedLinksDevices(): Promise<Device[]> {
       return [];
     }
 
-    const query = `filter=${encodeURIComponent("(opened=false)")}&sort=-created`;
-    const response = await fetch(`${serverUrl}/api/collections/shared_links/records?${query}`, {
-      headers: { Authorization: token },
-    });
-    if (!response.ok) {
-      throw new Error(`Shared Links request failed (${response.status}).`);
+    const baseQuery = `filter=${encodeURIComponent("(opened=false)")}&sort=-created`;
+    const records: SharedLinkRecord[] = [];
+    let page = 1;
+    let totalPages = 1;
+
+    while (page <= totalPages && page <= MAX_SHARED_LINK_PAGES) {
+      const query = `${baseQuery}&perPage=200&page=${page}`;
+      const response = await fetch(`${serverUrl}/api/collections/shared_links/records?${query}`, {
+        headers: { Authorization: token },
+      });
+      if (!response.ok) {
+        throw new Error(`Shared Links request failed (${response.status}).`);
+      }
+
+      const data = (await response.json()) as ListResponse<SharedLinkRecord>;
+      records.push(...(data.items ?? []));
+      totalPages = data.totalPages ?? page;
+      page += 1;
     }
 
-    const data = (await response.json()) as ListResponse<SharedLinkRecord>;
-    const tabs = (data.items ?? [])
+    if (page <= totalPages) {
+      console.warn(`Shared Links pagination stopped after ${MAX_SHARED_LINK_PAGES} pages.`);
+    }
+
+    const tabs = records
       .map(normalizeSharedLink)
       .filter((tab) => tab.url && isOpenableUrl(tab.url));
     return groupSharedLinksByDestination(tabs);

@@ -1,9 +1,126 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BROWSER_GROUPS_RECORD_ID,
+  loadSharedLinksDevices,
   markSharedLinksOpened,
   syncTabGroupsToServer,
 } from "../src/popup/shared-links";
+
+describe("loadSharedLinksDevices", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("chrome", {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({
+            pocketbaseServerUrl: "https://pocketbase.test",
+            pocketbaseToken: "token",
+          })),
+        },
+      },
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("concatenates two pages while preserving the shared-link query", async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        json: async () => ({
+          items: [
+            {
+              destination: "Research",
+              id: "first",
+              source: "Phone",
+              title: "First link",
+              url: "https://example.test/first",
+            },
+          ],
+          page: 1,
+          perPage: 200,
+          totalItems: 2,
+          totalPages: 2,
+        }),
+        ok: true,
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          items: [
+            {
+              destination: "Research",
+              id: "second",
+              source: "Phone",
+              title: "Second link",
+              url: "https://example.test/second",
+            },
+          ],
+          page: 2,
+          perPage: 200,
+          totalItems: 2,
+          totalPages: 2,
+        }),
+        ok: true,
+      });
+
+    const devices = await loadSharedLinksDevices();
+
+    expect(devices).toHaveLength(1);
+    expect(devices[0]?.tabs.map((tab) => tab.id)).toEqual(["shared:first", "shared:second"]);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://pocketbase.test/api/collections/shared_links/records?filter=(opened%3Dfalse)&sort=-created&perPage=200&page=1",
+      { headers: { Authorization: "token" } },
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://pocketbase.test/api/collections/shared_links/records?filter=(opened%3Dfalse)&sort=-created&perPage=200&page=2",
+      { headers: { Authorization: "token" } },
+    );
+  });
+
+  it("does not request another page when the response is single-page", async () => {
+    fetchMock.mockResolvedValue({
+      json: async () => ({
+        items: [],
+        page: 1,
+        perPage: 200,
+        totalItems: 0,
+        totalPages: 1,
+      }),
+      ok: true,
+    });
+
+    await expect(loadSharedLinksDevices()).resolves.toEqual([]);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("warns and stops after the pagination safety cap", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    fetchMock.mockResolvedValue({
+      json: async () => ({
+        items: [],
+        page: 1,
+        perPage: 200,
+        totalItems: 4_200,
+        totalPages: 21,
+      }),
+      ok: true,
+    });
+
+    await expect(loadSharedLinksDevices()).resolves.toEqual([]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(20);
+    expect(warnSpy).toHaveBeenCalledWith("Shared Links pagination stopped after 20 pages.");
+  });
+});
 
 describe("markSharedLinksOpened", () => {
   const fetchMock = vi.fn();
