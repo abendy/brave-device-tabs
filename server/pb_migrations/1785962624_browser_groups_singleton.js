@@ -3,7 +3,7 @@ const BROWSER_GROUPS_RECORD_ID = "browsergroups01";
 
 migrate((app) => {
   const collection = app.findCollectionByNameOrId("browser_groups");
-  const records = app.findRecordsByFilter(collection, "", "-updated", 0, 0);
+  const records = app.findAllRecords(collection);
   const fixedRecord = records.find((record) => record.id === BROWSER_GROUPS_RECORD_ID);
 
   if (fixedRecord) {
@@ -15,9 +15,15 @@ migrate((app) => {
     return;
   }
 
+  const latestRecord = records.reduce((latest, record) => {
+    if (!latest || record.getString("updated") > latest.getString("updated")) {
+      return record;
+    }
+    return latest;
+  }, null);
   const canonicalRecord = new Record(collection);
   canonicalRecord.id = BROWSER_GROUPS_RECORD_ID;
-  canonicalRecord.set("groups", records[0]?.get("groups") ?? []);
+  canonicalRecord.set("groups", latestRecord?.get("groups") ?? []);
   app.save(canonicalRecord);
 
   for (const record of records) {

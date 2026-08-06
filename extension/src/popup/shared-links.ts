@@ -158,15 +158,17 @@ async function writeTabGroups(
   if (createResponse.ok) {
     return;
   }
-  if (!(await isBrowserGroupsIdConflict(createResponse))) {
-    throw await pocketBaseResponseError(createResponse, "Syncing tab groups");
-  }
 
-  const retryResponse = await fetch(recordUrl, {
-    headers: { Authorization: token },
-  });
-  if (!retryResponse.ok) {
-    throw await pocketBaseResponseError(retryResponse, "Loading tab groups");
+  let retryResponse: Response | undefined;
+  try {
+    retryResponse = await fetch(recordUrl, {
+      headers: { Authorization: token },
+    });
+  } catch {
+    // Preserve the original create failure when the race check is unreachable.
+  }
+  if (!retryResponse?.ok) {
+    throw await pocketBaseResponseError(createResponse, "Syncing tab groups");
   }
   await patchTabGroups(recordUrl, token, groups);
 }
@@ -188,21 +190,6 @@ async function patchTabGroups(
   });
   if (!response.ok) {
     throw await pocketBaseResponseError(response, "Syncing tab groups");
-  }
-}
-
-async function isBrowserGroupsIdConflict(response: Response): Promise<boolean> {
-  if (response.status !== 400) {
-    return false;
-  }
-
-  try {
-    const body = (await response.json()) as {
-      data?: { id?: { code?: unknown } };
-    };
-    return body.data?.id?.code === "validation_not_unique";
-  } catch {
-    return false;
   }
 }
 

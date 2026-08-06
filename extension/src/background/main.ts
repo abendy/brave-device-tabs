@@ -41,8 +41,10 @@ export function registerBackgroundListeners(): void {
   chrome.tabGroups.onRemoved.addListener(scheduleTabGroupSync);
   chrome.tabGroups.onUpdated.addListener(scheduleTabGroupSync);
   chrome.tabs.onAttached.addListener(scheduleTabGroupSync);
+  chrome.tabs.onCreated.addListener(scheduleTabGroupSync);
   chrome.tabs.onDetached.addListener(scheduleTabGroupSync);
   chrome.tabs.onMoved.addListener(scheduleTabGroupSync);
+  chrome.tabs.onRemoved.addListener(scheduleTabGroupSync);
   chrome.runtime.onInstalled.addListener(startBackgroundSync);
   chrome.runtime.onStartup.addListener(startBackgroundSync);
 }

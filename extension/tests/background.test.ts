@@ -32,8 +32,10 @@ describe("background tab-group sync", () => {
       },
       tabs: {
         onAttached: createEvent(),
+        onCreated: createEvent(),
         onDetached: createEvent(),
         onMoved: createEvent(),
+        onRemoved: createEvent(),
       },
     });
     vi.resetModules();
