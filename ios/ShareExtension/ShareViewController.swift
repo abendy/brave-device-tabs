@@ -79,7 +79,7 @@ final class ShareViewController: UIViewController {
     /// live browser tab group yet come first, then live groups clustered per
     /// window (windows ascending, groups by first-tab index then title). A
     /// title duplicated across windows renders in each window's cluster —
-    /// the picker tags carry the window, so the rows stay distinct.
+    /// the row destinations carry the window, so the rows stay distinct.
     private static func destinationSections(
         live: [BrowserGroup], known: [PocketBaseClient.KnownDestination]
     ) -> (
@@ -88,7 +88,7 @@ final class ShareViewController: UIViewController {
     ) {
         var liveTitles = Set<String>()
         var seenPerWindow = Set<String>()
-        var groupsByWindow: [Int: [(title: String, sortIndex: Int)]] = [:]
+        var groupsByWindow: [Int: [(option: ShareComposeModel.GroupOption, sortIndex: Int)]] = [:]
 
         for group in live {
             let title = group.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -96,7 +96,12 @@ final class ShareViewController: UIViewController {
                   seenPerWindow.insert("\(group.windowID):\(title.localizedLowercase)").inserted
             else { continue }
             liveTitles.insert(title.localizedLowercase)
-            groupsByWindow[group.windowID, default: []].append((title, group.index))
+            groupsByWindow[group.windowID, default: []].append(
+                (
+                    option: ShareComposeModel.GroupOption(title: title, color: group.color),
+                    sortIndex: group.index
+                )
+            )
         }
 
         let byWindow = groupsByWindow.keys.sorted().map { windowID in
@@ -105,10 +110,10 @@ final class ShareViewController: UIViewController {
                 groups: (groupsByWindow[windowID] ?? [])
                     .sorted {
                         $0.sortIndex == $1.sortIndex
-                            ? $0.title.localizedStandardCompare($1.title) == .orderedAscending
+                            ? $0.option.title.localizedStandardCompare($1.option.title) == .orderedAscending
                             : $0.sortIndex < $1.sortIndex
                     }
-                    .map(\.title)
+                    .map(\.option)
             )
         }
 

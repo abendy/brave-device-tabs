@@ -17,18 +17,30 @@ final class ShareComposeModel: ObservableObject {
         let windowID: Int?
     }
 
+    struct GroupOption: Hashable {
+        let title: String
+        let color: String?
+    }
+
     struct WindowGroupCluster: Hashable {
         let windowID: Int
-        let groups: [String]
+        let groups: [GroupOption]
+
+        var preview: String {
+            let titles = groups.map(\.title)
+            let shown = titles.prefix(3).joined(separator: ", ")
+            let remaining = titles.count - 3
+            return remaining > 0 ? "\(shown) +\(remaining)" : shown
+        }
     }
 
     @Published var sharedURL: URL?
     /// iOS-created destinations with no live browser tab group yet — the
-    /// Links screen's "Other groups". They lead the menu because a group just
+    /// Links screen's "Other groups". They lead the destination list because a group just
     /// created from iOS is the most likely pick when saving more links to it.
     @Published var pendingGroups: [DestinationOption] = []
     /// Live browser tab groups clustered per window, in the Links screen's
-    /// window and in-window order.
+    /// window and in-window order, with their Chrome colors.
     @Published var windowGroups: [WindowGroupCluster] = []
     @Published var selectedDestination: Destination = .none
     @Published var newGroupName: String = ""
