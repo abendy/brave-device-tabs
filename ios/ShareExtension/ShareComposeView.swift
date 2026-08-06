@@ -94,7 +94,7 @@ struct ShareComposeView: View {
             }
             .navigationTitle("Save to Device Tabs")
             .navigationBarTitleDisplayMode(.inline)
-            .onChange(of: model.selectedDestination) { newDestination in
+            .onChange(of: model.selectedDestination) { _, newDestination in
                 if case .new = newDestination {
                     Task { @MainActor in
                         isGroupNameFocused = true
