@@ -18,6 +18,13 @@ export interface TabDestination {
   windowId: number;
 }
 
+interface SharedLinkGroup {
+  destination: string;
+  destinationKey: string;
+  tabs: DeviceTab[];
+  windowId: number | undefined;
+}
+
 export function normalizeDevices(rawDevices: chrome.sessions.Device[]): Device[] {
   return rawDevices
     .map((device, deviceIndex) => normalizeDevice(device, deviceIndex))
@@ -77,30 +84,109 @@ export function normalizeSharedLink(record: SharedLinkRecord): DeviceTab {
 }
 
 export function groupSharedLinksByDestination(tabs: DeviceTab[]): Device[] {
-  const groups = new Map<string, DeviceTab[]>();
+  const groups = new Map<string, SharedLinkGroup>();
 
   for (const tab of tabs) {
-    const key = tab.destination || "";
-    const group = groups.get(key) ?? [];
-    group.push(tab);
-    groups.set(key, group);
+    const destination = tab.destination?.trim() || "";
+    const destinationKey = destination.toLocaleLowerCase();
+    const windowId = destination ? tab.destinationWindowId : undefined;
+    const key = JSON.stringify([destinationKey, windowId ?? null]);
+    const group = groups.get(key);
+
+    if (group) {
+      group.tabs.push(tab);
+      continue;
+    }
+
+    groups.set(key, { destination, destinationKey, tabs: [tab], windowId });
   }
 
-  return [...groups.keys()].sort(compareDestinations).map((destination) => ({
-    id: `shared-links:${destination ? slug(destination) : "none"}`,
-    name: destination || "Shared Links",
-    tabs: groups.get(destination) ?? [],
-  }));
+  const destinationBucketCounts = countDestinationBuckets(groups.values());
+  const windowRanks = getWindowRanks(groups.values());
+
+  return [...groups.values()]
+    .sort((left, right) => compareSharedLinkGroups(left, right, windowRanks))
+    .map((group) => ({
+      id: getSharedLinkGroupId(group),
+      name: getSharedLinkGroupName(group, destinationBucketCounts, windowRanks),
+      tabs: group.tabs,
+    }));
 }
 
-function compareDestinations(left: string, right: string): number {
-  if (left === "" || right === "") {
-    if (left === right) {
+function countDestinationBuckets(groups: Iterable<SharedLinkGroup>): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const group of groups) {
+    counts.set(group.destinationKey, (counts.get(group.destinationKey) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function getWindowRanks(groups: Iterable<SharedLinkGroup>): Map<number, number> {
+  const windowIds = new Set<number>();
+  for (const group of groups) {
+    if (group.windowId !== undefined) {
+      windowIds.add(group.windowId);
+    }
+  }
+
+  const ranks = new Map<number, number>();
+  [...windowIds]
+    .sort((left, right) => left - right)
+    .forEach((windowId, index) => {
+      ranks.set(windowId, index + 1);
+    });
+  return ranks;
+}
+
+function compareSharedLinkGroups(
+  left: SharedLinkGroup,
+  right: SharedLinkGroup,
+  windowRanks: ReadonlyMap<number, number>,
+): number {
+  const leftUndirected = left.destinationKey === "";
+  const rightUndirected = right.destinationKey === "";
+  if (leftUndirected !== rightUndirected) {
+    return leftUndirected ? -1 : 1;
+  }
+
+  const titleComparison = left.destinationKey.localeCompare(right.destinationKey);
+  if (titleComparison !== 0) {
+    return titleComparison;
+  }
+
+  if (left.windowId === undefined || right.windowId === undefined) {
+    if (left.windowId === right.windowId) {
       return 0;
     }
-    return left === "" ? -1 : 1;
+    return left.windowId === undefined ? -1 : 1;
   }
-  return left.localeCompare(right);
+
+  return (windowRanks.get(left.windowId) ?? 0) - (windowRanks.get(right.windowId) ?? 0);
+}
+
+function getSharedLinkGroupName(
+  group: SharedLinkGroup,
+  destinationBucketCounts: ReadonlyMap<string, number>,
+  windowRanks: ReadonlyMap<number, number>,
+): string {
+  if (!group.destination) {
+    return "Shared Links";
+  }
+
+  const hasCollision = (destinationBucketCounts.get(group.destinationKey) ?? 0) > 1;
+  if (!hasCollision || group.windowId === undefined) {
+    return group.destination;
+  }
+
+  const windowRank = windowRanks.get(group.windowId);
+  return windowRank === undefined
+    ? group.destination
+    : `${group.destination} · Window ${windowRank}`;
+}
+
+function getSharedLinkGroupId(group: SharedLinkGroup): string {
+  const baseId = `shared-links:${group.destination ? slug(group.destination) : "none"}`;
+  return group.windowId === undefined ? baseId : `${baseId}:w${group.windowId}`;
 }
 
 export function getOpenedIdSet(history: OpenedBatch[]): Set<string> {

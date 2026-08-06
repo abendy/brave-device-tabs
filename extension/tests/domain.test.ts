@@ -47,6 +47,87 @@ describe("popup domain", () => {
     ]);
   });
 
+  it("splits same-titled destinations by window and ranks windows ascending", () => {
+    const devices = groupSharedLinksByDestination([
+      sharedTab("late", "Research", 30),
+      sharedTab("early", "Research", 12),
+    ]);
+
+    expect(
+      devices.map((device) => ({
+        id: device.id,
+        name: device.name,
+        tabIds: device.tabs.map((tab) => tab.id),
+      })),
+    ).toEqual([
+      {
+        id: "shared-links:research:w12",
+        name: "Research · Window 1",
+        tabIds: ["shared:early"],
+      },
+      {
+        id: "shared-links:research:w30",
+        name: "Research · Window 2",
+        tabIds: ["shared:late"],
+      },
+    ]);
+  });
+
+  it("puts a windowless bucket before its windowed collision", () => {
+    const devices = groupSharedLinksByDestination([
+      sharedTab("windowed", "Research", 12),
+      sharedTab("windowless", "Research"),
+    ]);
+
+    expect(
+      devices.map((device) => ({
+        id: device.id,
+        name: device.name,
+        tabIds: device.tabs.map((tab) => tab.id),
+      })),
+    ).toEqual([
+      {
+        id: "shared-links:research",
+        name: "Research",
+        tabIds: ["shared:windowless"],
+      },
+      {
+        id: "shared-links:research:w12",
+        name: "Research · Window 1",
+        tabIds: ["shared:windowed"],
+      },
+    ]);
+  });
+
+  it("does not suffix a unique title with its window", () => {
+    const devices = groupSharedLinksByDestination([sharedTab("one", "Research", 12)]);
+
+    expect(devices).toEqual([
+      expect.objectContaining({
+        id: "shared-links:research:w12",
+        name: "Research",
+      }),
+    ]);
+  });
+
+  it("merges case-variant titles in the same window using the first casing", () => {
+    const devices = groupSharedLinksByDestination([
+      sharedTab("first", "Research", 12),
+      sharedTab("second", "research", 12),
+    ]);
+
+    expect(devices).toEqual([
+      expect.objectContaining({
+        id: "shared-links:research:w12",
+        name: "Research",
+        tabs: expect.arrayContaining([
+          expect.objectContaining({ id: "shared:first" }),
+          expect.objectContaining({ id: "shared:second" }),
+        ]),
+      }),
+    ]);
+  });
+
   it("matches tab-group destinations without case sensitivity and otherwise falls back", () => {
     const tab = sharedTab("one", "Research");
     const groups = [{ id: 9, title: " research ", windowId: 12 }] as chrome.tabGroups.TabGroup[];
