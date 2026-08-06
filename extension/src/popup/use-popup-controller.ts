@@ -182,18 +182,14 @@ export function usePopupController(
       setOpeningMode(mode);
       setStatus(null);
       try {
-        await services.openTabs(tabs);
         // Keep the popup alive until the newly created/updated group has been
         // written. Closing first can terminate this page and abort the fetch.
         // With an expired session the write can only fail (and its GET would
         // take the record-creation branch), so it is skipped entirely.
-        if (!sessionExpired.current) {
-          try {
-            await services.syncTabGroupsToServer();
-          } catch (error) {
-            throw new OpenedTabsSyncError(error);
-          }
-        }
+        await services.openTabs(
+          tabs,
+          sessionExpired.current ? null : () => services.syncTabGroupsToServer(),
+        );
         closePopup();
       } catch (error) {
         console.error("Unable to open selected tabs:", error);
