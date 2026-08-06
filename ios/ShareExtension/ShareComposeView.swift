@@ -61,7 +61,7 @@ struct ShareComposeView: View {
                     }
 
                     ForEach(model.windowGroups, id: \.windowID) { cluster in
-                        Section("Window") {
+                        Section {
                             ForEach(cluster.groups, id: \.self) { group in
                                 destinationRow(
                                     title: group.title,
