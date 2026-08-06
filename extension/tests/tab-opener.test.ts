@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { markSharedLinksOpened } from "../src/popup/shared-links";
 import { recordOpenedBatch } from "../src/popup/storage";
-import { OpenedTabsCleanupError, openTabsInBrowser } from "../src/popup/tab-opener";
+import {
+  OpenedTabsCleanupError,
+  OpenedTabsSyncError,
+  openTabsInBrowser,
+} from "../src/popup/tab-opener";
 import type { DeviceTab } from "../src/popup/types";
 
 vi.mock("../src/popup/shared-links", () => ({ markSharedLinksOpened: vi.fn() }));
@@ -32,10 +36,11 @@ describe("openTabsInBrowser", () => {
     });
   });
 
-  it("opens the whole batch before bookkeeping and activates its first tab last", async () => {
+  it("syncs the group snapshot before link and history bookkeeping", async () => {
     const tabs = [tab("shared:one", "Research"), tab("sync:two", null)];
+    const syncTabGroups = vi.fn(async () => undefined);
 
-    await openTabsInBrowser(tabs);
+    await openTabsInBrowser(tabs, syncTabGroups);
 
     expect(create).toHaveBeenNthCalledWith(1, {
       active: false,
@@ -53,16 +58,47 @@ describe("openTabsInBrowser", () => {
     expect(markSharedLinksOpened).toHaveBeenCalledWith(tabs);
     expect(recordOpenedBatch).toHaveBeenCalledWith(tabs);
 
-    const activationOrder = updateTab.mock.invocationCallOrder[0] ?? 0;
-    expect(vi.mocked(recordOpenedBatch).mock.invocationCallOrder[0]).toBeLessThan(activationOrder);
+    const lastCreateOrder = create.mock.invocationCallOrder.at(-1) ?? 0;
+    const syncOrder = syncTabGroups.mock.invocationCallOrder[0] ?? 0;
+    const markOrder = vi.mocked(markSharedLinksOpened).mock.invocationCallOrder[0] ?? 0;
+    const recordOrder = vi.mocked(recordOpenedBatch).mock.invocationCallOrder[0] ?? 0;
+    expect(lastCreateOrder).toBeLessThan(syncOrder);
+    expect(syncOrder).toBeLessThan(markOrder);
+    expect(markOrder).toBeLessThan(recordOrder);
   });
 
-  it("surfaces a server update failure without recording false opened history", async () => {
-    vi.mocked(markSharedLinksOpened).mockRejectedValueOnce(new Error("PATCH failed"));
+  it("marks links and records history before surfacing a snapshot sync failure", async () => {
+    const tabs = [tab("shared:one", "Research")];
+    const syncTabGroups = vi.fn().mockRejectedValueOnce(new Error("Sync failed"));
 
-    await expect(openTabsInBrowser([tab("shared:one", "Research")])).rejects.toBeInstanceOf(
-      OpenedTabsCleanupError,
+    await expect(openTabsInBrowser(tabs, syncTabGroups)).rejects.toBeInstanceOf(
+      OpenedTabsSyncError,
     );
+
+    expect(markSharedLinksOpened).toHaveBeenCalledWith(tabs);
+    expect(recordOpenedBatch).toHaveBeenCalledWith(tabs);
+  });
+
+  it("skips snapshot sync when no hook is provided", async () => {
+    const tabs = [tab("shared:one", "Research")];
+
+    await openTabsInBrowser(tabs, null);
+
+    expect(markSharedLinksOpened).toHaveBeenCalledWith(tabs);
+    expect(recordOpenedBatch).toHaveBeenCalledWith(tabs);
+  });
+
+  it("surfaces link cleanup failure when snapshot sync also fails", async () => {
+    vi.mocked(markSharedLinksOpened).mockRejectedValueOnce(new Error("PATCH failed"));
+    const syncTabGroups = vi.fn().mockRejectedValueOnce(new Error("Sync failed"));
+
+    const result = openTabsInBrowser([tab("shared:one", "Research")], syncTabGroups);
+    const error = await result.catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(OpenedTabsCleanupError);
+    expect(error).toMatchObject({
+      message: "The tabs opened, but their shared links could not be cleared. PATCH failed",
+      name: "OpenedTabsCleanupError",
+    });
 
     expect(recordOpenedBatch).not.toHaveBeenCalled();
     expect(updateTab).toHaveBeenCalledWith(11, { active: true });
@@ -73,7 +109,7 @@ describe("openTabsInBrowser", () => {
     create.mockResolvedValueOnce({ id: 21 });
     group.mockResolvedValueOnce(55);
 
-    await openTabsInBrowser([tab("shared:one", "Reading List")]);
+    await openTabsInBrowser([tab("shared:one", "Reading List")], null);
 
     expect(group).toHaveBeenCalledWith({ tabIds: [21] });
     expect(updateGroup).toHaveBeenCalledWith(55, { title: "Reading List" });
@@ -84,7 +120,10 @@ describe("openTabsInBrowser", () => {
     create.mockResolvedValueOnce({ id: 21 }).mockResolvedValueOnce({ id: 22 });
     group.mockResolvedValueOnce(55);
 
-    await openTabsInBrowser([tab("shared:one", "Reading List"), tab("shared:two", "Reading List")]);
+    await openTabsInBrowser(
+      [tab("shared:one", "Reading List"), tab("shared:two", "Reading List")],
+      null,
+    );
 
     expect(group).toHaveBeenNthCalledWith(1, { tabIds: [21] });
     expect(group).toHaveBeenNthCalledWith(2, { groupId: 55, tabIds: [22] });
@@ -97,10 +136,10 @@ describe("openTabsInBrowser", () => {
     create.mockResolvedValueOnce({ id: 21 }).mockResolvedValueOnce({ id: 22 });
     group.mockResolvedValueOnce(55).mockResolvedValueOnce(56);
 
-    await openTabsInBrowser([
-      tab("shared:one", "Reading List", 2),
-      tab("shared:two", "Reading List"),
-    ]);
+    await openTabsInBrowser(
+      [tab("shared:one", "Reading List", 2), tab("shared:two", "Reading List")],
+      null,
+    );
 
     expect(create).toHaveBeenNthCalledWith(1, {
       active: false,
@@ -122,7 +161,7 @@ describe("openTabsInBrowser", () => {
     create.mockReset();
     create.mockResolvedValueOnce({ id: 21 });
 
-    await openTabsInBrowser([tab("sync:one", null)]);
+    await openTabsInBrowser([tab("sync:one", null)], null);
 
     expect(group).not.toHaveBeenCalled();
     expect(updateGroup).not.toHaveBeenCalled();

@@ -11,7 +11,7 @@ export interface PopupServices {
   loadSharedLinksDevices(): Promise<Device[]>;
   loadSyncedDevices(): Promise<LoadSyncedDevicesResult>;
   openOptionsPage(): void;
-  openTabs(tabs: DeviceTab[]): Promise<void>;
+  openTabs(tabs: DeviceTab[], syncTabGroups: (() => Promise<void>) | null): Promise<void>;
   refreshSession(): Promise<SessionState>;
   syncTabGroupsToServer(): Promise<void>;
 }

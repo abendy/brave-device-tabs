@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/popup/App";
 import type { PopupServices } from "../src/popup/popup-services";
+import { OpenedTabsSyncError } from "../src/popup/tab-opener";
 import type { Device, DeviceTab } from "../src/popup/types";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -77,7 +78,13 @@ describe("App", () => {
   it("filters, selects visible tabs, and opens only the selection", async () => {
     const alpha = tab("alpha", "Alpha article");
     const beta = tab("beta", "Beta article");
-    const openTabs = vi.fn(async () => undefined);
+    const openTabs = vi.fn<PopupServices["openTabs"]>(async (_tabs, syncTabGroups) => {
+      try {
+        await syncTabGroups?.();
+      } catch (error) {
+        throw new OpenedTabsSyncError(error);
+      }
+    });
     const closePopup = vi.fn();
     const services = servicesWith([device(alpha, beta)], openTabs);
     let finishPostOpenSync!: () => void;
@@ -106,7 +113,7 @@ describe("App", () => {
     expect(container.textContent).toContain("Open selected (1)");
     await clickButton(container, "Open selected (1)");
 
-    expect(openTabs).toHaveBeenCalledWith([alpha]);
+    expect(openTabs).toHaveBeenCalledWith([alpha], expect.any(Function));
     expect(syncTabGroupsToServer).toHaveBeenCalledTimes(2);
     expect(closePopup).not.toHaveBeenCalled();
 
@@ -116,7 +123,13 @@ describe("App", () => {
 
   it("reports a tab group sync failure after the tabs open successfully", async () => {
     const alpha = tab("alpha", "Alpha article");
-    const openTabs = vi.fn(async () => undefined);
+    const openTabs = vi.fn<PopupServices["openTabs"]>(async (_tabs, syncTabGroups) => {
+      try {
+        await syncTabGroups?.();
+      } catch (error) {
+        throw new OpenedTabsSyncError(error);
+      }
+    });
     const closePopup = vi.fn();
     const services = servicesWith([device(alpha)], openTabs);
     services.syncTabGroupsToServer = vi
@@ -128,7 +141,7 @@ describe("App", () => {
     await clickButton(container, "Devices");
     await clickButton(container, "Open all (1)");
 
-    expect(openTabs).toHaveBeenCalledWith([alpha]);
+    expect(openTabs).toHaveBeenCalledWith([alpha], expect.any(Function));
     expect(container.textContent).toContain(
       "The tabs opened, but their tab group snapshot could not be synced.",
     );
@@ -161,7 +174,7 @@ describe("App", () => {
     expect(container.textContent).toContain("Alpha article");
     await clickButton(container, "Open all (1)");
 
-    expect(openTabs).toHaveBeenCalledWith([alpha]);
+    expect(openTabs).toHaveBeenCalledWith([alpha], null);
     expect(syncTabGroupsToServer).not.toHaveBeenCalled();
     expect(closePopup).toHaveBeenCalledOnce();
   });
@@ -247,7 +260,12 @@ function requiredElement<ElementType extends Element>(
   return element;
 }
 
-function servicesWith(devices: Device[], openTabs = vi.fn(async () => undefined)): PopupServices {
+function servicesWith(
+  devices: Device[],
+  openTabs: PopupServices["openTabs"] = vi.fn(async (_tabs, syncTabGroups) => {
+    await syncTabGroups?.();
+  }),
+): PopupServices {
   return {
     deleteSharedLink: async () => true,
     loadOpenedHistory: async () => [],

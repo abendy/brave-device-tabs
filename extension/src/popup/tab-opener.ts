@@ -24,7 +24,10 @@ export class OpenedTabsSyncError extends Error {
   }
 }
 
-export async function openTabsInBrowser(tabs: DeviceTab[]): Promise<void> {
+export async function openTabsInBrowser(
+  tabs: DeviceTab[],
+  syncTabGroups: (() => Promise<void>) | null,
+): Promise<void> {
   if (tabs.length === 0) {
     return;
   }
@@ -37,6 +40,17 @@ export async function openTabsInBrowser(tabs: DeviceTab[]): Promise<void> {
   );
   const firstTab = await createBrowserTabs(tabs, currentWindowId, liveGroups, liveWindowIds);
 
+  let syncFailed = false;
+  let syncError: unknown;
+  if (syncTabGroups !== null) {
+    try {
+      await syncTabGroups();
+    } catch (error) {
+      syncFailed = true;
+      syncError = error;
+    }
+  }
+
   try {
     await markSharedLinksOpened(tabs);
   } catch (error) {
@@ -45,6 +59,9 @@ export async function openTabsInBrowser(tabs: DeviceTab[]): Promise<void> {
   }
   await recordOpenedBatch(tabs);
   await activateFirstTab(firstTab, currentWindowId);
+  if (syncFailed) {
+    throw new OpenedTabsSyncError(syncError);
+  }
 }
 
 async function createBrowserTabs(
