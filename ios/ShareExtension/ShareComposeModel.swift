@@ -23,7 +23,6 @@ final class ShareComposeModel: ObservableObject {
     }
 
     @Published var sharedURL: URL?
-    @Published var noteText: String = ""
     /// iOS-created destinations with no live browser tab group yet — the
     /// Links screen's "Other groups". They lead the menu because a group just
     /// created from iOS is the most likely pick when saving more links to it.
@@ -56,14 +55,13 @@ final class ShareComposeModel: ObservableObject {
         }
 
         isPosting = true
-        let note = noteText
         let destination = resolvedDestination()
 
         Task {
             do {
                 try await PocketBaseClient.shareLink(
                     url: sharedURL.absoluteString,
-                    title: note.isEmpty ? nil : note,
+                    title: nil,
                     source: UIDevice.current.name,
                     destination: destination.title,
                     destinationWindowID: destination.windowID

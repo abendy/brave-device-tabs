@@ -17,10 +17,6 @@ struct ShareComposeView: View {
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    Section("Note") {
-                        TextField("Optional note", text: $model.noteText, axis: .vertical)
-                    }
-
                     Section("Destination") {
                         Picker(selection: $model.selectedDestination) {
                             Text("No group").tag(ShareComposeModel.Destination.none)
