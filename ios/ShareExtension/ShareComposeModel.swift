@@ -25,13 +25,6 @@ final class ShareComposeModel: ObservableObject {
     struct WindowGroupCluster: Hashable {
         let windowID: Int
         let groups: [GroupOption]
-
-        var preview: String {
-            let titles = groups.map(\.title)
-            let shown = titles.prefix(3).joined(separator: ", ")
-            let remaining = titles.count - 3
-            return remaining > 0 ? "\(shown) +\(remaining)" : shown
-        }
     }
 
     @Published var sharedURL: URL?

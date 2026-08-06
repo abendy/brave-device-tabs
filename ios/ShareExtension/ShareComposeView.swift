@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ShareComposeView: View {
     @ObservedObject var model: ShareComposeModel
+    @FocusState private var isGroupNameFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -37,10 +38,12 @@ struct ShareComposeView: View {
                             title: "New group…",
                             destination: .new(windowID: nil),
                             showsColorDot: false,
-                            usesAccentColor: true,
-                            isNewGroup: true,
-                            windowID: nil
+                            usesAccentColor: true
                         )
+                        if case .new(let windowID) = model.selectedDestination, windowID == nil {
+                            TextField("Group name", text: $model.newGroupName)
+                                .focused($isGroupNameFocused)
+                        }
                     }
 
                     if !model.pendingGroups.isEmpty {
@@ -58,7 +61,7 @@ struct ShareComposeView: View {
                     }
 
                     ForEach(model.windowGroups, id: \.windowID) { cluster in
-                        Section("Window · \(cluster.preview)") {
+                        Section("Window") {
                             ForEach(cluster.groups, id: \.self) { group in
                                 destinationRow(
                                     title: group.title,
@@ -72,10 +75,13 @@ struct ShareComposeView: View {
                                 title: "New group here…",
                                 destination: .new(windowID: cluster.windowID),
                                 showsColorDot: false,
-                                usesAccentColor: true,
-                                isNewGroup: true,
-                                windowID: cluster.windowID
+                                usesAccentColor: true
                             )
+                            if case .new(let windowID) = model.selectedDestination,
+                               windowID == cluster.windowID {
+                                TextField("Group name", text: $model.newGroupName)
+                                    .focused($isGroupNameFocused)
+                            }
                         }
                     }
                 }
@@ -88,6 +94,15 @@ struct ShareComposeView: View {
             }
             .navigationTitle("Save to Device Tabs")
             .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: model.selectedDestination) { newDestination in
+                if case .new = newDestination {
+                    Task { @MainActor in
+                        isGroupNameFocused = true
+                    }
+                } else {
+                    isGroupNameFocused = false
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: model.cancel)
@@ -118,43 +133,31 @@ struct ShareComposeView: View {
         }
     }
 
-    @ViewBuilder
     private func destinationRow(
         title: String,
         destination: ShareComposeModel.Destination,
         colorName: String? = nil,
         showsColorDot: Bool = true,
-        usesAccentColor: Bool = false,
-        isNewGroup: Bool = false,
-        windowID: Int? = nil
+        usesAccentColor: Bool = false
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button {
-                model.selectedDestination = destination
-            } label: {
-                HStack(spacing: 12) {
-                    if showsColorDot {
-                        GroupColorDot(colorName: colorName)
-                    }
-                    Text(title)
-                        .foregroundStyle(usesAccentColor ? Color.accentColor : Color.primary)
-                    Spacer()
-                    if model.selectedDestination == destination {
-                        Image(systemName: "checkmark")
-                            .foregroundStyle(Color.accentColor)
-                    }
+        Button {
+            model.selectedDestination = destination
+        } label: {
+            HStack(spacing: 12) {
+                if showsColorDot {
+                    GroupColorDot(colorName: colorName)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if isNewGroup {
-                if case .new(let selectedWindowID) = model.selectedDestination,
-                   selectedWindowID == windowID {
-                    TextField("Group name", text: $model.newGroupName)
+                Text(title)
+                    .foregroundStyle(usesAccentColor ? Color.accentColor : Color.primary)
+                Spacer()
+                if model.selectedDestination == destination {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(Color.accentColor)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 }
