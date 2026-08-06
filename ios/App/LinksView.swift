@@ -560,10 +560,14 @@ private struct WindowGroupDisclosure: View {
                 HStack(spacing: 8) {
                     Image(systemName: "macwindow")
                         .foregroundStyle(.secondary)
-                    Text(window.title)
+                    Text(
+                        window.windowID == nil
+                            ? window.title
+                            : "\(window.groups.count) \(window.groups.count == 1 ? "group" : "groups")"
+                    )
                         .font(.headline)
+                    Spacer()
                     if !isExpanded {
-                        Spacer()
                         Text("\(totalLinkCount)")
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
