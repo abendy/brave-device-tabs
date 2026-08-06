@@ -20,6 +20,7 @@ struct LinksView: View {
     @State private var deleteErrorMessage: String?
     @State private var stagedLinkIDs: Set<String> = []
     @State private var newGroupName: String = ""
+    @State private var newGroupWindowID: Int? = nil
     @State private var loadCoordinator = LinksLoadCoordinator()
     @State private var collapsedWindowIDs: Set<String> = Set(
         UserDefaults.standard.stringArray(forKey: LinksView.collapsedWindowsKey) ?? []
@@ -144,6 +145,8 @@ struct LinksView: View {
                             stagedLinks: stagedLinks,
                             dragContext: $dragContext,
                             groupName: $newGroupName,
+                            windowID: $newGroupWindowID,
+                            windowOptions: liveWindowSections,
                             onStage: stage,
                             onUnstage: unstage,
                             onSave: saveNewGroup
@@ -196,8 +199,16 @@ struct LinksView: View {
 
     fileprivate struct WindowSection: Identifiable {
         let id: String
+        let windowID: Int?
         let title: String
         let groups: [LinkSection]
+
+        fileprivate var collapsedPreview: String {
+            let titles = groups.map(\.title)
+            let shown = titles.prefix(3).joined(separator: ", ")
+            let remaining = titles.count - 3
+            return remaining > 0 ? "\(shown) +\(remaining)" : shown
+        }
     }
 
     /// Treats nil, empty, and whitespace-only destinations as the same "no
@@ -309,6 +320,7 @@ struct LinksView: View {
             windows.append(
                 WindowSection(
                     id: "window:unknown",
+                    windowID: nil,
                     title: "Other groups",
                     groups: unknown.map { bucket in
                         LinkSection(
@@ -328,6 +340,7 @@ struct LinksView: View {
         windows += groupsByWindow.keys.sorted().map { windowID in
             WindowSection(
                 id: "window:\(windowID)",
+                windowID: windowID,
                 title: "Tab Groups",
                 groups: (groupsByWindow[windowID] ?? []).sorted {
                     $0.sortIndex == $1.sortIndex
@@ -338,6 +351,10 @@ struct LinksView: View {
         }
 
         return windows
+    }
+
+    private var liveWindowSections: [WindowSection] {
+        windowSections.filter { $0.windowID != nil }
     }
 
     private func move(linkID: String, to destination: String?, windowID: Int?) {
@@ -385,10 +402,11 @@ struct LinksView: View {
         guard !trimmedName.isEmpty else { return }
 
         for linkID in stagedLinkIDs {
-            move(linkID: linkID, to: trimmedName, windowID: nil)
+            move(linkID: linkID, to: trimmedName, windowID: newGroupWindowID)
         }
         stagedLinkIDs.removeAll()
         newGroupName = ""
+        newGroupWindowID = nil
     }
 
     private func delete(linkID: String) {
@@ -554,15 +572,6 @@ private struct WindowGroupDisclosure: View {
     let onDrop: (_ linkID: String, _ destination: String?, _ windowID: Int?) -> Void
     let onDelete: (_ linkID: String) -> Void
 
-    private static let previewCount = 3
-
-    private var collapsedPreview: String {
-        let titles = window.groups.map(\.title)
-        let shown = titles.prefix(Self.previewCount).joined(separator: ", ")
-        let remaining = titles.count - Self.previewCount
-        return remaining > 0 ? "\(shown) +\(remaining)" : shown
-    }
-
     private var totalLinkCount: Int {
         window.groups.reduce(0) { $0 + $1.links.count }
     }
@@ -595,8 +604,8 @@ private struct WindowGroupDisclosure: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                if !isExpanded && !collapsedPreview.isEmpty {
-                    Text(collapsedPreview)
+                if !isExpanded && !window.collapsedPreview.isEmpty {
+                    Text(window.collapsedPreview)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -761,6 +770,8 @@ private struct NewGroupDropTarget: View {
     let stagedLinks: [SharedLink]
     @Binding var dragContext: LinkDragContext?
     @Binding var groupName: String
+    @Binding var windowID: Int?
+    let windowOptions: [LinksView.WindowSection]
     let onStage: (_ linkID: String) -> Void
     let onUnstage: (_ linkID: String) -> Void
     let onSave: () -> Void
@@ -781,6 +792,21 @@ private struct NewGroupDropTarget: View {
                         .disabled(trimmedName.isEmpty)
                 }
                 .padding(12)
+
+                if !windowOptions.isEmpty {
+                    Picker("Window", selection: $windowID) {
+                        Text("Any window").tag(nil as Int?)
+                        ForEach(windowOptions) { window in
+                            Text(window.collapsedPreview)
+                                .tag(window.windowID)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
+                }
             }
 
             ZStack {
