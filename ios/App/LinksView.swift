@@ -265,6 +265,7 @@ struct LinksView: View {
         var seenGroups = Set<String>()
         var slots: [(windowID: Int, title: String, key: String, sortIndex: Int, color: String?)] = []
         var windowsByTitle: [String: [Int]] = [:]
+        let liveWindowIDs = Set(browserGroups.map(\.windowID))
 
         for group in browserGroups {
             guard let title = normalizedDestination(group.title) else { continue }
@@ -279,10 +280,43 @@ struct LinksView: View {
         // show their own links. Windowless (or stale-window) links go to the
         // title's first-encountered window, as before.
         var linksBySlot: [String: [SharedLink]] = [:]
+        var groupsByWindow: [Int: [LinkSection]] = [:]
         var unknownBuckets: [DestinationBucket] = []
         for (key, bucket) in buckets {
+            // A newly-created group is absent until the extension syncs; keep
+            // its links in their live destination window while that happens.
             guard let windows = windowsByTitle[key] else {
-                unknownBuckets.append(bucket)
+                var linksWithoutLiveWindow: [SharedLink] = []
+                var linksByLiveWindow: [Int: [SharedLink]] = [:]
+                for link in bucket.links {
+                    guard let windowID = link.destinationWindowID, liveWindowIDs.contains(windowID) else {
+                        linksWithoutLiveWindow.append(link)
+                        continue
+                    }
+
+                    linksByLiveWindow[windowID, default: []].append(link)
+                }
+                for (windowID, links) in linksByLiveWindow {
+                    groupsByWindow[windowID, default: []].append(
+                        LinkSection(
+                            id: "window:\(windowID):group:\(key)",
+                            title: bucket.displayTitle,
+                            sortIndex: .max,
+                            color: nil,
+                            destination: bucket.displayTitle,
+                            destinationWindowID: windowID,
+                            links: links
+                        )
+                    )
+                }
+                if !linksWithoutLiveWindow.isEmpty {
+                    unknownBuckets.append(
+                        DestinationBucket(
+                            displayTitle: bucket.displayTitle,
+                            links: linksWithoutLiveWindow
+                        )
+                    )
+                }
                 continue
             }
             for link in bucket.links {
@@ -296,7 +330,6 @@ struct LinksView: View {
             }
         }
 
-        var groupsByWindow: [Int: [LinkSection]] = [:]
         for slot in slots {
             groupsByWindow[slot.windowID, default: []].append(
                 LinkSection(
