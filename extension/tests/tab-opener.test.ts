@@ -111,7 +111,7 @@ describe("openTabsInBrowser", () => {
 
     await openTabsInBrowser([tab("shared:one", "Reading List")], null);
 
-    expect(group).toHaveBeenCalledWith({ tabIds: [21] });
+    expect(group).toHaveBeenCalledWith({ createProperties: { windowId: 1 }, tabIds: [21] });
     expect(updateGroup).toHaveBeenCalledWith(55, { title: "Reading List" });
   });
 
@@ -125,7 +125,10 @@ describe("openTabsInBrowser", () => {
       null,
     );
 
-    expect(group).toHaveBeenNthCalledWith(1, { tabIds: [21] });
+    expect(group).toHaveBeenNthCalledWith(1, {
+      createProperties: { windowId: 1 },
+      tabIds: [21],
+    });
     expect(group).toHaveBeenNthCalledWith(2, { groupId: 55, tabIds: [22] });
     expect(updateGroup).toHaveBeenCalledTimes(1);
     expect(updateGroup).toHaveBeenCalledWith(55, { title: "Reading List" });
@@ -151,10 +154,30 @@ describe("openTabsInBrowser", () => {
       url: "https://shared-two.test",
       windowId: 1,
     });
-    expect(group).toHaveBeenNthCalledWith(1, { tabIds: [21] });
-    expect(group).toHaveBeenNthCalledWith(2, { tabIds: [22] });
+    expect(group).toHaveBeenNthCalledWith(1, {
+      createProperties: { windowId: 2 },
+      tabIds: [21],
+    });
+    expect(group).toHaveBeenNthCalledWith(2, {
+      createProperties: { windowId: 1 },
+      tabIds: [22],
+    });
     expect(updateGroup).toHaveBeenNthCalledWith(1, 55, { title: "Reading List" });
     expect(updateGroup).toHaveBeenNthCalledWith(2, 56, { title: "Reading List" });
+  });
+
+  it("creates a new group in a non-current destination window", async () => {
+    create.mockReset();
+    create.mockResolvedValueOnce({ id: 21 });
+    group.mockResolvedValueOnce(55);
+
+    await openTabsInBrowser([tab("shared:one", "Reading List", 2)], null);
+
+    expect(group).toHaveBeenCalledWith({
+      createProperties: { windowId: 2 },
+      tabIds: [21],
+    });
+    expect(updateGroup).toHaveBeenCalledWith(55, { title: "Reading List" });
   });
 
   it("leaves tabs without a destination ungrouped", async () => {

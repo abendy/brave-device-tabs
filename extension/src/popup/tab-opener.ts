@@ -120,9 +120,12 @@ async function addTabToNewGroup(
     return;
   }
 
-  // The tab was created in the destination window, so the new group forms
-  // there without needing createProperties.
-  const groupId = await chrome.tabs.group({ tabIds: [tabId] });
+  // Explicitly keep the new group in the destination window; Chrome otherwise
+  // defaults it to the current window.
+  const groupId = await chrome.tabs.group({
+    createProperties: { windowId },
+    tabIds: [tabId],
+  });
   newGroupIdsByWindowAndTitle.set(key, groupId);
   await chrome.tabGroups.update(groupId, { title });
 }
