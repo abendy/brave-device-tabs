@@ -18,16 +18,15 @@ struct LinksView: View {
     @State private var dragContext: LinkDragContext?
     @State private var moveErrorMessage: String?
     @State private var deleteErrorMessage: String?
-    @State private var stagedLinkIDs: Set<String> = []
-    @State private var newGroupName: String = ""
-    @State private var newGroupWindowID: Int? = nil
+    @State private var stagedLinkIDsByGroup: [String: Set<String>] = [:]
+    @State private var newGroupNamesByGroup: [String: String] = [:]
     @State private var loadCoordinator = LinksLoadCoordinator()
     @State private var collapsedWindowIDs: Set<String> = Set(
         UserDefaults.standard.stringArray(forKey: LinksView.collapsedWindowsKey) ?? []
     )
 
     private static let noGroupTitle = "No group"
-    private static let newGroupSectionID = "new-group"
+    private static let windowlessNewGroupKey = "new-group:windowless"
     private static let collapsedWindowsKey = "collapsedLinkWindows"
 
     var body: some View {
@@ -141,15 +140,19 @@ struct LinksView: View {
                             .padding(.horizontal, 4)
 
                         NewGroupDropTarget(
-                            sectionID: Self.newGroupSectionID,
-                            stagedLinks: stagedLinks,
+                            sectionID: Self.windowlessNewGroupKey,
+                            stagedLinks: stagedLinks(for: Self.windowlessNewGroupKey),
                             dragContext: $dragContext,
-                            groupName: $newGroupName,
-                            windowID: $newGroupWindowID,
-                            windowOptions: liveWindowSections,
-                            onStage: stage,
-                            onUnstage: unstage,
-                            onSave: saveNewGroup
+                            groupName: newGroupNameBinding(for: Self.windowlessNewGroupKey),
+                            onStage: { linkID in
+                                stage(linkID: linkID, for: Self.windowlessNewGroupKey)
+                            },
+                            onUnstage: { linkID in
+                                unstage(linkID: linkID, from: Self.windowlessNewGroupKey)
+                            },
+                            onSave: {
+                                saveNewGroup(for: Self.windowlessNewGroupKey, windowID: nil)
+                            }
                         )
                     }
 
@@ -159,7 +162,8 @@ struct LinksView: View {
                             isExpanded: isExpandedBinding(for: window.id),
                             dragContext: $dragContext,
                             onDrop: move,
-                            onDelete: delete
+                            onDelete: delete,
+                            newGroup: newGroupConfiguration(for: window)
                         )
                     }
                 }
@@ -235,6 +239,7 @@ struct LinksView: View {
     private var groupedLinks: (byDestination: [String: DestinationBucket], noGroup: [SharedLink]) {
         var byDestination: [String: DestinationBucket] = [:]
         var noGroup: [SharedLink] = []
+        let stagedLinkIDs = self.stagedLinkIDs
         for link in links where !stagedLinkIDs.contains(link.id) {
             if let destination = normalizedDestination(link.destination) {
                 let key = destination.localizedLowercase
@@ -249,8 +254,13 @@ struct LinksView: View {
         return (byDestination, noGroup)
     }
 
-    private var stagedLinks: [SharedLink] {
-        links.filter { stagedLinkIDs.contains($0.id) }
+    private var stagedLinkIDs: Set<String> {
+        Set(stagedLinkIDsByGroup.values.flatMap { $0 })
+    }
+
+    private func stagedLinks(for groupKey: String) -> [SharedLink] {
+        guard let stagedLinkIDs = stagedLinkIDsByGroup[groupKey] else { return [] }
+        return links.filter { stagedLinkIDs.contains($0.id) }
     }
 
     private var noGroupSection: LinkSection {
@@ -386,8 +396,23 @@ struct LinksView: View {
         return windows
     }
 
-    private var liveWindowSections: [WindowSection] {
-        windowSections.filter { $0.windowID != nil }
+    private func newGroupConfiguration(for window: WindowSection) -> NewGroupConfiguration? {
+        guard let windowID = window.windowID else { return nil }
+        let groupKey = "new-group:window:\(windowID)"
+        return NewGroupConfiguration(
+            sectionID: groupKey,
+            stagedLinks: stagedLinks(for: groupKey),
+            groupName: newGroupNameBinding(for: groupKey),
+            onStage: { linkID in
+                stage(linkID: linkID, for: groupKey)
+            },
+            onUnstage: { linkID in
+                unstage(linkID: linkID, from: groupKey)
+            },
+            onSave: {
+                saveNewGroup(for: groupKey, windowID: windowID)
+            }
+        )
     }
 
     private func move(linkID: String, to destination: String?, windowID: Int?) {
@@ -422,24 +447,47 @@ struct LinksView: View {
         }
     }
 
-    private func stage(linkID: String) {
-        stagedLinkIDs.insert(linkID)
+    private func newGroupNameBinding(for groupKey: String) -> Binding<String> {
+        Binding(
+            get: { newGroupNamesByGroup[groupKey] ?? "" },
+            set: { newGroupNamesByGroup[groupKey] = $0 }
+        )
     }
 
-    private func unstage(linkID: String) {
+    private func stage(linkID: String, for groupKey: String) {
+        let otherGroupKeys = stagedLinkIDsByGroup.keys.filter { $0 != groupKey }
+        for otherGroupKey in otherGroupKeys {
+            guard var stagedLinkIDs = stagedLinkIDsByGroup[otherGroupKey] else { continue }
+            stagedLinkIDs.remove(linkID)
+            if stagedLinkIDs.isEmpty {
+                stagedLinkIDsByGroup[otherGroupKey] = nil
+            } else {
+                stagedLinkIDsByGroup[otherGroupKey] = stagedLinkIDs
+            }
+        }
+        stagedLinkIDsByGroup[groupKey, default: []].insert(linkID)
+    }
+
+    private func unstage(linkID: String, from groupKey: String) {
+        guard var stagedLinkIDs = stagedLinkIDsByGroup[groupKey] else { return }
         stagedLinkIDs.remove(linkID)
+        if stagedLinkIDs.isEmpty {
+            stagedLinkIDsByGroup[groupKey] = nil
+        } else {
+            stagedLinkIDsByGroup[groupKey] = stagedLinkIDs
+        }
     }
 
-    private func saveNewGroup() {
-        let trimmedName = newGroupName.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func saveNewGroup(for groupKey: String, windowID: Int?) {
+        let trimmedName = (newGroupNamesByGroup[groupKey] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { return }
 
-        for linkID in stagedLinkIDs {
-            move(linkID: linkID, to: trimmedName, windowID: newGroupWindowID)
+        for linkID in stagedLinkIDsByGroup[groupKey] ?? [] {
+            move(linkID: linkID, to: trimmedName, windowID: windowID)
         }
-        stagedLinkIDs.removeAll()
-        newGroupName = ""
-        newGroupWindowID = nil
+        stagedLinkIDsByGroup[groupKey] = nil
+        newGroupNamesByGroup[groupKey] = nil
     }
 
     private func delete(linkID: String) {
@@ -563,12 +611,22 @@ private final class LinksLoadCoordinator {
     }
 }
 
+private struct NewGroupConfiguration {
+    let sectionID: String
+    let stagedLinks: [SharedLink]
+    let groupName: Binding<String>
+    let onStage: (_ linkID: String) -> Void
+    let onUnstage: (_ linkID: String) -> Void
+    let onSave: () -> Void
+}
+
 private struct WindowGroupDisclosure: View {
     let window: LinksView.WindowSection
     @Binding var isExpanded: Bool
     @Binding var dragContext: LinkDragContext?
     let onDrop: (_ linkID: String, _ destination: String?, _ windowID: Int?) -> Void
     let onDelete: (_ linkID: String) -> Void
+    let newGroup: NewGroupConfiguration?
 
     private var totalLinkCount: Int {
         window.groups.reduce(0) { $0 + $1.links.count }
@@ -584,6 +642,26 @@ private struct WindowGroupDisclosure: View {
                         onDrop: onDrop,
                         onDelete: onDelete
                     )
+                }
+                if let newGroup {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("New Group")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .textCase(.uppercase)
+                            .padding(.horizontal, 4)
+
+                        NewGroupDropTarget(
+                            sectionID: newGroup.sectionID,
+                            stagedLinks: newGroup.stagedLinks,
+                            dragContext: $dragContext,
+                            groupName: newGroup.groupName,
+                            onStage: newGroup.onStage,
+                            onUnstage: newGroup.onUnstage,
+                            onSave: newGroup.onSave
+                        )
+                    }
+                    .padding(.top, 8)
                 }
             }
             .padding(.top, 10)
@@ -772,8 +850,6 @@ private struct NewGroupDropTarget: View {
     let stagedLinks: [SharedLink]
     @Binding var dragContext: LinkDragContext?
     @Binding var groupName: String
-    @Binding var windowID: Int?
-    let windowOptions: [LinksView.WindowSection]
     let onStage: (_ linkID: String) -> Void
     let onUnstage: (_ linkID: String) -> Void
     let onSave: () -> Void
@@ -794,21 +870,6 @@ private struct NewGroupDropTarget: View {
                         .disabled(trimmedName.isEmpty)
                 }
                 .padding(12)
-
-                if !windowOptions.isEmpty {
-                    Picker("Window", selection: $windowID) {
-                        Text("Any window").tag(nil as Int?)
-                        ForEach(windowOptions) { window in
-                            Text(window.collapsedPreview)
-                                .tag(window.windowID)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 8)
-                }
             }
 
             ZStack {
