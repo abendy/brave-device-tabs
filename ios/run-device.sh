@@ -42,11 +42,15 @@ xcodegen generate
 # stale Debug-iphonesimulator product could sit next to a fresh
 # Debug-iphoneos one, and `find | head -1` would pick either unpredictably.
 # That silently tried to install a simulator binary onto a real device once.
+# -allowProvisioningUpdates: free-account profiles expire after 7 days, and
+# xcodebuild otherwise reuses the cached (possibly expired) one — the app
+# then dies on the device with "no longer available" when the week is up.
 xcodebuild build \
   -project DeviceTabsShare.xcodeproj \
   -scheme DeviceTabsShare \
   -destination "platform=iOS,id=$DEVICE_ID" \
-  -derivedDataPath build-device
+  -derivedDataPath build-device \
+  -allowProvisioningUpdates
 
 APP_PATH=$(find build-device/Build/Products/Debug-iphoneos -maxdepth 1 -name "DeviceTabsShare.app" | head -1)
 if [[ -z "$APP_PATH" ]]; then
