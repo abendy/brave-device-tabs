@@ -53,8 +53,10 @@ describe("openTabsInBrowser", () => {
       windowId: 1,
     });
     expect(group).toHaveBeenCalledWith({ groupId: 7, tabIds: [11] });
-    expect(updateWindow).toHaveBeenCalledWith(2, { focused: true });
-    expect(updateTab).toHaveBeenCalledWith(11, { active: true });
+    // The grouped tab appends silently; only the ungrouped tab (already in
+    // the current window) is activated.
+    expect(updateWindow).not.toHaveBeenCalled();
+    expect(updateTab).toHaveBeenCalledWith(12, { active: true });
     expect(markSharedLinksOpened).toHaveBeenCalledWith(tabs);
     expect(recordOpenedBatch).toHaveBeenCalledWith(tabs);
 
@@ -101,7 +103,9 @@ describe("openTabsInBrowser", () => {
     });
 
     expect(recordOpenedBatch).not.toHaveBeenCalled();
-    expect(updateTab).toHaveBeenCalledWith(11, { active: true });
+    // The batch was all grouped tabs, so nothing is activated even on the
+    // cleanup-failure path.
+    expect(updateTab).not.toHaveBeenCalled();
   });
 
   it("creates a new tab group for a destination with no live match, and titles it", async () => {
@@ -178,6 +182,17 @@ describe("openTabsInBrowser", () => {
       tabIds: [21],
     });
     expect(updateGroup).toHaveBeenCalledWith(55, { title: "Reading List" });
+  });
+
+  it("opens grouped tabs silently, without focusing a window or activating a tab", async () => {
+    create.mockReset();
+    create.mockResolvedValueOnce({ id: 21 }).mockResolvedValueOnce({ id: 22 });
+
+    await openTabsInBrowser([tab("shared:one", "Research"), tab("shared:two", "Research")], null);
+
+    expect(group).toHaveBeenCalledTimes(2);
+    expect(updateWindow).not.toHaveBeenCalled();
+    expect(updateTab).not.toHaveBeenCalled();
   });
 
   it("leaves tabs without a destination ungrouped", async () => {

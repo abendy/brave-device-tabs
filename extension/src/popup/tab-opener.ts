@@ -38,6 +38,9 @@ export async function openTabsInBrowser(
   const liveWindowIds = new Set(
     liveWindows.map((window) => window.id).filter((id): id is number => id !== undefined),
   );
+  // Tabs with a group destination append to it silently — no window focus,
+  // no tab activation — so only the first ungrouped tab (which has no group
+  // to be found in later) is worth surfacing.
   const firstTab = await createBrowserTabs(tabs, currentWindowId, liveGroups, liveWindowIds);
 
   let syncFailed = false;
@@ -69,8 +72,8 @@ async function createBrowserTabs(
   defaultWindowId: number,
   liveGroups: chrome.tabGroups.TabGroup[],
   liveWindowIds: ReadonlySet<number>,
-): Promise<FirstCreatedTab> {
-  let firstTab: FirstCreatedTab | null = null;
+): Promise<FirstCreatedTab | null> {
+  let firstUngroupedTab: FirstCreatedTab | null = null;
   // Tracks new groups created within this batch, keyed by window plus
   // lower-cased title, so multiple tabs sharing an unmatched destination
   // land in one group — while the same title aimed at two windows still
@@ -90,7 +93,9 @@ async function createBrowserTabs(
 
     if (destination.groupId !== null) {
       await chrome.tabs.group({ groupId: destination.groupId, tabIds: [created.id] });
-    } else if (destination.newGroupTitle !== null) {
+    } else if (destination.newGroupTitle === null) {
+      firstUngroupedTab ??= { id: created.id, windowId: destination.windowId };
+    } else {
       await addTabToNewGroup(
         created.id,
         destination.newGroupTitle,
@@ -98,13 +103,9 @@ async function createBrowserTabs(
         newGroupIdsByWindowAndTitle,
       );
     }
-    firstTab ??= { id: created.id, windowId: destination.windowId };
   }
 
-  if (!firstTab) {
-    throw new Error("No browser tabs were created.");
-  }
-  return firstTab;
+  return firstUngroupedTab;
 }
 
 async function addTabToNewGroup(
@@ -130,7 +131,13 @@ async function addTabToNewGroup(
   await chrome.tabGroups.update(groupId, { title });
 }
 
-async function activateFirstTab(firstTab: FirstCreatedTab, currentWindowId: number): Promise<void> {
+async function activateFirstTab(
+  firstTab: FirstCreatedTab | null,
+  currentWindowId: number,
+): Promise<void> {
+  if (firstTab === null) {
+    return;
+  }
   if (firstTab.windowId !== currentWindowId) {
     await chrome.windows.update(firstTab.windowId, { focused: true });
   }
