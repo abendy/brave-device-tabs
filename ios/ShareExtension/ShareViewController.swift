@@ -138,6 +138,7 @@ final class ShareViewController: UIViewController {
                 guard let url = item as? URL else { return }
                 DispatchQueue.main.async {
                     self?.model.sharedURL = url
+                    self?.model.checkForDuplicate()
                 }
             }
         } else if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
@@ -145,6 +146,7 @@ final class ShareViewController: UIViewController {
                 guard let text = item as? String else { return }
                 DispatchQueue.main.async {
                     self?.model.sharedURL = Self.firstURL(in: text)
+                    self?.model.checkForDuplicate()
                 }
             }
         }

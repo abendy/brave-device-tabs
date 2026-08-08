@@ -225,6 +225,41 @@ enum PocketBaseClient {
         return links
     }
 
+    /// First unopened link with this exact URL, for duplicate warnings before
+    /// a share. Callers treat failures as "no duplicate found" — reads with a
+    /// dead token come back empty rather than failing (SYNC_REVIEW.md finding
+    /// #10), so validate the session first for a trustworthy answer.
+    static func findSharedLink(url: String) async throws -> SharedLink? {
+        guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
+            throw PocketBaseError.notConfigured
+        }
+        guard var components = URLComponents(
+            url: serverURL.appendingPathComponent("api/collections/shared_links/records"),
+            resolvingAgainstBaseURL: false
+        ) else { throw PocketBaseError.invalidResponse }
+        let escaped = url
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        components.queryItems = [
+            URLQueryItem(name: "filter", value: "(opened=false && url='\(escaped)')"),
+            URLQueryItem(name: "perPage", value: "1"),
+        ]
+        guard let requestURL = components.url else { throw PocketBaseError.invalidResponse }
+
+        var request = URLRequest(url: requestURL, cachePolicy: .reloadIgnoringLocalCacheData)
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.setValue(token, forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw PocketBaseError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            throw PocketBaseError.server(errorMessage(from: data) ?? "Could not check for duplicates (\(http.statusCode)).")
+        }
+
+        let list = try JSONDecoder().decode(PocketBaseListResponse<SharedLink>.self, from: data)
+        return list.items.first
+    }
+
     /// Empty string clears the destination, matching how the extension
     /// treats an empty `destination` as "no group" throughout; 0 clears the
     /// window preference the same way.

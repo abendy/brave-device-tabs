@@ -40,6 +40,12 @@ final class ShareComposeModel: ObservableObject {
     @Published var isPosting = false
     @Published var isSessionExpired = false
     @Published var saveErrorMessage: String?
+    /// An unopened link with the same URL, when one already exists; drives
+    /// the "Already saved" banner and the Save Anyway button title.
+    @Published var duplicateOf: SharedLink?
+    /// Non-nil once the save succeeded; the sheet shows this confirmation
+    /// briefly and then dismisses itself.
+    @Published var savedSummary: String?
 
     var onCancel: (() -> Void)?
     var onComplete: (() -> Void)?
@@ -73,6 +79,15 @@ final class ShareComposeModel: ObservableObject {
                 )
                 await MainActor.run {
                     self.isPosting = false
+                    let label = self.destinationLabel(
+                        title: destination.title, windowID: destination.windowID
+                    )
+                    self.savedSummary = "Saved to \(label)"
+                }
+                // Leave the confirmation on screen long enough to read
+                // before the sheet dismisses itself.
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                await MainActor.run {
                     self.onComplete?()
                 }
             } catch {
@@ -82,6 +97,39 @@ final class ShareComposeModel: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Best-effort: no banner is shown when the probe cannot get a
+    /// trustworthy answer (unreachable, expired, or misconfigured).
+    func checkForDuplicate() {
+        guard isConfigured, let sharedURL else { return }
+        let urlString = sharedURL.absoluteString
+
+        Task {
+            // A dead token would make the probe read back empty instead of
+            // failing (SYNC_REVIEW.md finding #10) — validate first so a
+            // missing banner can't just mean a silently dead session.
+            guard await PocketBaseClient.refreshSession() == .valid else { return }
+            let existing = (try? await PocketBaseClient.findSharedLink(url: urlString)) ?? nil
+            await MainActor.run {
+                guard self.sharedURL?.absoluteString == urlString else { return }
+                self.duplicateOf = existing
+            }
+        }
+    }
+
+    /// Human-readable destination for banners: "No group", "“Reading List”",
+    /// or "“Reading List” · Window 2". Window numbers follow the sheet's
+    /// cluster order (ascending window id), matching the popup's numbering;
+    /// a window that is no longer live gets no number.
+    func destinationLabel(title: String?, windowID: Int?) -> String {
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return "No group" }
+        guard
+            let windowID,
+            let index = windowGroups.firstIndex(where: { $0.windowID == windowID })
+        else { return "“\(trimmed)”" }
+        return "“\(trimmed)” · Window \(index + 1)"
     }
 
     func cancel() {

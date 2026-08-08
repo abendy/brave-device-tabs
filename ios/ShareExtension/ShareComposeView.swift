@@ -13,6 +13,18 @@ struct ShareComposeView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
+                        if let duplicate = model.duplicateOf {
+                            Label {
+                                Text(
+                                    "Already saved · \(model.destinationLabel(title: duplicate.destination, windowID: duplicate.destinationWindowID))"
+                                )
+                                .foregroundStyle(.secondary)
+                            } icon: {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                            }
+                            .font(.subheadline)
+                        }
                     }
                 }
 
@@ -111,14 +123,32 @@ struct ShareComposeView: View {
                     if model.isPosting {
                         ProgressView()
                     } else {
-                        Button("Post", action: model.post)
+                        Button(model.duplicateOf == nil ? "Post" : "Save Anyway", action: model.post)
                             .disabled(
                                 !model.isConfigured || model.isSessionExpired
                                     || model.sharedURL == nil || model.isNewGroupNameMissing
+                                    || model.savedSummary != nil
                             )
                     }
                 }
             }
+            .overlay {
+                if let summary = model.savedSummary {
+                    VStack(spacing: 12) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 44))
+                            .foregroundStyle(.green)
+                        Text(summary)
+                            .font(.headline)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(24)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .padding(.horizontal, 32)
+                    .transition(.opacity)
+                }
+            }
+            .animation(.easeIn(duration: 0.15), value: model.savedSummary)
             .alert(
                 "Couldn't save link",
                 isPresented: Binding(
