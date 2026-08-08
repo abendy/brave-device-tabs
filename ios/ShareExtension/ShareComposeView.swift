@@ -123,7 +123,7 @@ struct ShareComposeView: View {
                     if model.isPosting {
                         ProgressView()
                     } else {
-                        Button(model.duplicateOf == nil ? "Post" : "Save Anyway", action: model.post)
+                        Button(model.duplicateOf == nil ? "Post" : "Move", action: model.post)
                             .disabled(
                                 !model.isConfigured || model.isSessionExpired
                                     || model.sharedURL == nil || model.isNewGroupNameMissing

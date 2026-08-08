@@ -68,21 +68,34 @@ final class ShareComposeModel: ObservableObject {
         isPosting = true
         let destination = resolvedDestination()
 
+        // A duplicate turns Post into Move: the existing record is
+        // re-targeted at the chosen destination instead of saving a second
+        // copy of the same URL.
+        let duplicate = duplicateOf
+
         Task {
             do {
-                try await PocketBaseClient.shareLink(
-                    url: sharedURL.absoluteString,
-                    title: nil,
-                    source: UIDevice.current.name,
-                    destination: destination.title,
-                    destinationWindowID: destination.windowID
-                )
+                if let duplicate {
+                    try await PocketBaseClient.updateLinkDestination(
+                        id: duplicate.id,
+                        destination: destination.title,
+                        windowID: destination.windowID
+                    )
+                } else {
+                    try await PocketBaseClient.shareLink(
+                        url: sharedURL.absoluteString,
+                        title: nil,
+                        source: UIDevice.current.name,
+                        destination: destination.title,
+                        destinationWindowID: destination.windowID
+                    )
+                }
                 await MainActor.run {
                     self.isPosting = false
                     let label = self.destinationLabel(
                         title: destination.title, windowID: destination.windowID
                     )
-                    self.savedSummary = "Saved to \(label)"
+                    self.savedSummary = "\(duplicate == nil ? "Saved" : "Moved") to \(label)"
                 }
                 // Leave the confirmation on screen long enough to read
                 // before the sheet dismisses itself.
