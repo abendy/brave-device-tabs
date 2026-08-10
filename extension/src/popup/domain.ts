@@ -89,7 +89,7 @@ export function groupSharedLinksByDestination(tabs: DeviceTab[]): Device[] {
   for (const tab of tabs) {
     const destination = tab.destination?.trim() || "";
     const destinationKey = destination.toLocaleLowerCase();
-    const windowId = destination ? tab.destinationWindowId : undefined;
+    const windowId = tab.destinationWindowId;
     const key = JSON.stringify([destinationKey, windowId ?? null]);
     const group = groups.get(key);
 
@@ -170,7 +170,11 @@ function getSharedLinkGroupName(
   windowRanks: ReadonlyMap<number, number>,
 ): string {
   if (!group.destination) {
-    return "Shared Links";
+    if (group.windowId === undefined) {
+      return "Shared Links";
+    }
+    const windowRank = windowRanks.get(group.windowId);
+    return windowRank === undefined ? "Shared Links" : `Shared Links · Window ${windowRank}`;
   }
 
   const hasCollision = (destinationBucketCounts.get(group.destinationKey) ?? 0) > 1;
@@ -215,7 +219,14 @@ export function resolveTabDestination(
   liveWindowIds: ReadonlySet<number>,
 ): TabDestination {
   if (!tab.destination) {
-    return { groupId: null, newGroupTitle: null, windowId: defaultWindowId };
+    // A windowed no-group link opens ungrouped in its target window; a
+    // stale window falls back to the current one.
+    const requestedWindowId = tab.destinationWindowId;
+    const windowId =
+      requestedWindowId !== undefined && liveWindowIds.has(requestedWindowId)
+        ? requestedWindowId
+        : defaultWindowId;
+    return { groupId: null, newGroupTitle: null, windowId };
   }
 
   const trimmedDestination = tab.destination.trim();

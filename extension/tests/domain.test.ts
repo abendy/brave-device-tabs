@@ -99,6 +99,32 @@ describe("popup domain", () => {
     ]);
   });
 
+  it("splits windowed no-group links from windowless ones and names their window", () => {
+    const devices = groupSharedLinksByDestination([
+      sharedTab("windowed", null, 12),
+      sharedTab("windowless", null),
+    ]);
+
+    expect(
+      devices.map((device) => ({
+        id: device.id,
+        name: device.name,
+        tabIds: device.tabs.map((tab) => tab.id),
+      })),
+    ).toEqual([
+      {
+        id: "shared-links:none",
+        name: "Shared Links",
+        tabIds: ["shared:windowless"],
+      },
+      {
+        id: "shared-links:none:w12",
+        name: "Shared Links · Window 1",
+        tabIds: ["shared:windowed"],
+      },
+    ]);
+  });
+
   it("does not suffix a unique title with its window", () => {
     const devices = groupSharedLinksByDestination([sharedTab("one", "Research", 12)]);
 
@@ -150,6 +176,19 @@ describe("popup domain", () => {
     const tab = sharedTab("one", null);
 
     expect(resolveTabDestination(tab, 3, [], new Set([3]))).toEqual({
+      groupId: null,
+      newGroupTitle: null,
+      windowId: 3,
+    });
+  });
+
+  it("opens a windowed no-group tab ungrouped in its target window", () => {
+    expect(resolveTabDestination(sharedTab("one", null, 30), 3, [], new Set([3, 30]))).toEqual({
+      groupId: null,
+      newGroupTitle: null,
+      windowId: 30,
+    });
+    expect(resolveTabDestination(sharedTab("two", null, 99), 3, [], new Set([3, 30]))).toEqual({
       groupId: null,
       newGroupTitle: null,
       windowId: 3,
