@@ -170,12 +170,14 @@ enum PocketBaseClient {
             let destination: String?
             let destinationWindowId: Int?
         }
+        // A window id is meaningful without a destination: it saves the link
+        // ungrouped but aimed at that window.
         request.httpBody = try JSONEncoder().encode(Payload(
             url: url,
             source: source,
             title: (title?.isEmpty == false) ? title : nil,
             destination: (destination?.isEmpty == false) ? destination : nil,
-            destinationWindowId: (destination?.isEmpty == false) ? destinationWindowID : nil
+            destinationWindowId: destinationWindowID
         ))
 
         let (data, response) = try await URLSession.shared.data(for: request)

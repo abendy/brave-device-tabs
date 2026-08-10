@@ -42,7 +42,7 @@ struct ShareComposeView: View {
                     Section {
                         destinationRow(
                             title: "No group",
-                            destination: .none,
+                            destination: .none(windowID: nil),
                             showsColorDot: false,
                             usesAccentColor: true
                         )
@@ -83,6 +83,12 @@ struct ShareComposeView: View {
                                     colorName: group.color
                                 )
                             }
+                            destinationRow(
+                                title: "No group here",
+                                destination: .none(windowID: cluster.windowID),
+                                showsColorDot: false,
+                                usesAccentColor: true
+                            )
                             destinationRow(
                                 title: "New group here…",
                                 destination: .new(windowID: cluster.windowID),

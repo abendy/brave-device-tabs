@@ -208,7 +208,9 @@ struct LinksView: View {
         let groups: [LinkSection]
 
         fileprivate var collapsedPreview: String {
-            let titles = groups.map(\.title)
+            // The window's No group bucket is a fixture, not a tab group, so
+            // it stays out of the preview.
+            let titles = groups.filter { $0.destination != nil }.map(\.title)
             let shown = titles.prefix(3).joined(separator: ", ")
             let remaining = titles.count - 3
             return remaining > 0 ? "\(shown) +\(remaining)" : shown
@@ -235,23 +237,32 @@ struct LinksView: View {
     /// old section, until they're saved (or unstaged). Buckets are keyed by
     /// lowercased title so differently-cased destinations merge — matching
     /// how the extension resolves them — with the first link's casing kept
-    /// for display.
-    private var groupedLinks: (byDestination: [String: DestinationBucket], noGroup: [SharedLink]) {
+    /// for display. No-group links carrying a live window id fill that
+    /// window's own No group bucket; the rest stay in the global one.
+    private var groupedLinks: (
+        byDestination: [String: DestinationBucket],
+        noGroupByWindow: [Int: [SharedLink]],
+        noGroup: [SharedLink]
+    ) {
         var byDestination: [String: DestinationBucket] = [:]
+        var noGroupByWindow: [Int: [SharedLink]] = [:]
         var noGroup: [SharedLink] = []
         let stagedLinkIDs = self.stagedLinkIDs
+        let liveWindowIDs = Set(browserGroups.map(\.windowID))
         for link in links where !stagedLinkIDs.contains(link.id) {
             if let destination = normalizedDestination(link.destination) {
                 let key = destination.localizedLowercase
                 var bucket = byDestination[key] ?? DestinationBucket(displayTitle: destination, links: [])
                 bucket.links.append(link)
                 byDestination[key] = bucket
+            } else if let windowID = link.destinationWindowID, liveWindowIDs.contains(windowID) {
+                noGroupByWindow[windowID, default: []].append(link)
             } else {
                 noGroup.append(link)
             }
         }
 
-        return (byDestination, noGroup)
+        return (byDestination, noGroupByWindow, noGroup)
     }
 
     private var stagedLinkIDs: Set<String> {
@@ -271,7 +282,8 @@ struct LinksView: View {
     }
 
     private var windowSections: [WindowSection] {
-        let buckets = groupedLinks.byDestination
+        let grouped = groupedLinks
+        let buckets = grouped.byDestination
         var seenGroups = Set<String>()
         var slots: [(windowID: Int, title: String, key: String, sortIndex: Int, color: String?)] = []
         var windowsByTitle: [String: [Int]] = [:]
@@ -351,6 +363,24 @@ struct LinksView: View {
                     destinationWindowID: slot.windowID,
                     links: linksBySlot["\(slot.windowID):\(slot.key)"] ?? []
                 )
+            )
+        }
+
+        // Every live window gets its own No group bucket, first in its list
+        // (sortIndex .min beats every live group), so links can target a
+        // window without joining or creating a tab group there.
+        for windowID in groupsByWindow.keys {
+            groupsByWindow[windowID]?.insert(
+                LinkSection(
+                    id: "window:\(windowID):no-group",
+                    title: Self.noGroupTitle,
+                    sortIndex: .min,
+                    color: nil,
+                    destination: nil,
+                    destinationWindowID: windowID,
+                    links: grouped.noGroupByWindow[windowID] ?? []
+                ),
+                at: 0
             )
         }
 

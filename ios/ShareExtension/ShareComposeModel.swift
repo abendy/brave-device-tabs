@@ -7,7 +7,9 @@ import UIKit
 /// DEBUG.md.
 final class ShareComposeModel: ObservableObject {
     enum Destination: Hashable {
-        case none
+        /// A window id without a title saves the link ungrouped but still
+        /// aimed at that window.
+        case none(windowID: Int?)
         case existing(title: String, windowID: Int?)
         case new(windowID: Int?)
     }
@@ -35,7 +37,7 @@ final class ShareComposeModel: ObservableObject {
     /// Live browser tab groups clustered per window, in the Links screen's
     /// window and in-window order, with their Chrome colors.
     @Published var windowGroups: [WindowGroupCluster] = []
-    @Published var selectedDestination: Destination = .none
+    @Published var selectedDestination: Destination = .none(windowID: nil)
     @Published var newGroupName: String = ""
     @Published var isPosting = false
     @Published var isSessionExpired = false
@@ -137,12 +139,14 @@ final class ShareComposeModel: ObservableObject {
     /// a window that is no longer live gets no number.
     func destinationLabel(title: String?, windowID: Int?) -> String {
         let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !trimmed.isEmpty else { return "No group" }
-        guard
-            let windowID,
-            let index = windowGroups.firstIndex(where: { $0.windowID == windowID })
-        else { return "“\(trimmed)”" }
-        return "“\(trimmed)” · Window \(index + 1)"
+        let windowSuffix: String
+        if let windowID, let index = windowGroups.firstIndex(where: { $0.windowID == windowID }) {
+            windowSuffix = " · Window \(index + 1)"
+        } else {
+            windowSuffix = ""
+        }
+        guard !trimmed.isEmpty else { return "No group\(windowSuffix)" }
+        return "“\(trimmed)”\(windowSuffix)"
     }
 
     func cancel() {
@@ -151,8 +155,8 @@ final class ShareComposeModel: ObservableObject {
 
     private func resolvedDestination() -> (title: String?, windowID: Int?) {
         switch selectedDestination {
-        case .none:
-            return (nil, nil)
+        case .none(let windowID):
+            return (nil, windowID)
         case .existing(let title, let windowID):
             return (title, windowID)
         case .new(let windowID):
