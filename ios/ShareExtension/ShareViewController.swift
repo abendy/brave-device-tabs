@@ -75,10 +75,12 @@ final class ShareViewController: UIViewController {
         }
     }
 
-    /// Mirrors the Links screen's ordering: iOS-created destinations with no
-    /// live browser tab group yet come first, then live groups clustered per
-    /// window (windows ascending, groups by first-tab index then title). A
-    /// title duplicated across windows renders in each window's cluster —
+    /// Mirrors the Links screen's ordering: live groups cluster per window
+    /// (windows ascending, groups by first-tab index then title), and an
+    /// iOS-created destination with no live browser tab group yet renders
+    /// inside its target window's cluster (after the live groups) when that
+    /// window is live — only windowless or stale-window ones lead the list.
+    /// A title duplicated across windows renders in each window's cluster —
     /// the row destinations carry the window, so the rows stay distinct.
     private static func destinationSections(
         live: [BrowserGroup], known: [PocketBaseClient.KnownDestination]
@@ -104,6 +106,28 @@ final class ShareViewController: UIViewController {
             )
         }
 
+        let liveWindowIDs = Set(groupsByWindow.keys)
+        var pendingByWindow: [Int: [ShareComposeModel.GroupOption]] = [:]
+        var seenPending = Set<String>()
+        var pending: [ShareComposeModel.DestinationOption] = []
+        for destination in known where !liveTitles.contains(destination.title.localizedLowercase) {
+            if let windowID = destination.windowID, liveWindowIDs.contains(windowID) {
+                guard seenPending.insert("\(windowID):\(destination.title.localizedLowercase)").inserted
+                else { continue }
+                pendingByWindow[windowID, default: []].append(
+                    ShareComposeModel.GroupOption(title: destination.title, color: nil)
+                )
+            } else {
+                guard seenPending.insert(destination.title.localizedLowercase).inserted else { continue }
+                pending.append(
+                    ShareComposeModel.DestinationOption(
+                        title: destination.title, windowID: destination.windowID
+                    )
+                )
+            }
+        }
+        pending.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+
         let byWindow = groupsByWindow.keys.sorted().map { windowID in
             ShareComposeModel.WindowGroupCluster(
                 windowID: windowID,
@@ -114,15 +138,11 @@ final class ShareViewController: UIViewController {
                             : $0.sortIndex < $1.sortIndex
                     }
                     .map(\.option)
+                    + (pendingByWindow[windowID] ?? []).sorted {
+                        $0.title.localizedStandardCompare($1.title) == .orderedAscending
+                    }
             )
         }
-
-        var seenPending = Set<String>()
-        let pending = known
-            .filter { !liveTitles.contains($0.title.localizedLowercase) }
-            .filter { seenPending.insert($0.title.localizedLowercase).inserted }
-            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
-            .map { ShareComposeModel.DestinationOption(title: $0.title, windowID: $0.windowID) }
 
         return (pending, byWindow)
     }
