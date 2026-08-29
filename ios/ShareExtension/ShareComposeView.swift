@@ -55,6 +55,8 @@ struct ShareComposeView: View {
                         if case .new(let windowID) = model.selectedDestination, windowID == nil {
                             TextField("Group name", text: $model.newGroupName)
                                 .focused($isGroupNameFocused)
+                            Toggle("Pin this group", isOn: $model.pinNewGroup)
+                                .font(.subheadline)
                         }
                     }
 
@@ -99,6 +101,8 @@ struct ShareComposeView: View {
                                windowID == cluster.windowID {
                                 TextField("Group name", text: $model.newGroupName)
                                     .focused($isGroupNameFocused)
+                                Toggle("Pin this group", isOn: $model.pinNewGroup)
+                                    .font(.subheadline)
                             }
                         }
                     }

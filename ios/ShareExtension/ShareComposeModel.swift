@@ -39,6 +39,9 @@ final class ShareComposeModel: ObservableObject {
     @Published var windowGroups: [WindowGroupCluster] = []
     @Published var selectedDestination: Destination = .none(windowID: nil)
     @Published var newGroupName: String = ""
+    /// When a "New group…" destination is selected, also pin it on Post so
+    /// it stays offered as a destination after its links are consumed.
+    @Published var pinNewGroup = false
     @Published var isPosting = false
     @Published var isSessionExpired = false
     @Published var saveErrorMessage: String?
@@ -92,12 +95,24 @@ final class ShareComposeModel: ObservableObject {
                         destinationWindowID: destination.windowID
                     )
                 }
+                // Best-effort: a failed pin never undoes a successful save,
+                // and the summary only claims "pinned" when it stuck.
+                let pinned: Bool
+                if self.pinNewGroup, case .new = self.selectedDestination,
+                   let title = destination.title {
+                    pinned = (try? await PocketBaseClient.createPinnedGroup(
+                        title: title, windowID: destination.windowID
+                    )) != nil
+                } else {
+                    pinned = false
+                }
                 await MainActor.run {
                     self.isPosting = false
                     let label = self.destinationLabel(
                         title: destination.title, windowID: destination.windowID
                     )
-                    self.savedSummary = "\(duplicate == nil ? "Saved" : "Moved") to \(label)"
+                    let verb = duplicate == nil ? "Saved" : "Moved"
+                    self.savedSummary = "\(verb)\(pinned ? " and pinned" : "") to \(label)"
                 }
                 // Leave the confirmation on screen long enough to read
                 // before the sheet dismisses itself.
