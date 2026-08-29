@@ -148,6 +148,150 @@ async function performTabGroupSync(): Promise<void> {
   await writeTabGroups(serverUrl, token, groups);
 }
 
+/// Browser restarts reassign window ids, stranding pinned groups and
+/// windowed links on ids that no longer exist. The previous snapshot still
+/// knows which group titles each vanished window held, so its windows are
+/// fingerprinted and matched to live windows; server records pointing at a
+/// vanished id are patched over to its successor. Best-effort: a failure
+/// leaves records as they were, and the stale ids still degrade gracefully
+/// at open time.
+async function healStaleWindowReferences(
+  serverUrl: string,
+  token: string,
+  previousResponse: Response,
+  liveGroups: Array<{ title: string; windowId: number }>,
+): Promise<void> {
+  try {
+    const record = (await previousResponse.json()) as {
+      groups?: Array<{ title?: string; windowId?: number }>;
+    };
+    const previous = (record.groups ?? []).flatMap((group) =>
+      group.title && typeof group.windowId === "number"
+        ? [{ title: group.title, windowId: group.windowId }]
+        : [],
+    );
+
+    for (const [staleId, successorId] of mapStaleWindows(previous, liveGroups)) {
+      await retargetCollection(serverUrl, token, "pinned_groups", "windowId", staleId, successorId);
+      await retargetCollection(
+        serverUrl,
+        token,
+        "shared_links",
+        "destinationWindowId",
+        staleId,
+        successorId,
+        "opened=false && ",
+      );
+    }
+  } catch (error) {
+    console.warn("Stale window healing skipped:", error);
+  }
+}
+
+/// Maps each vanished window id to the live window that best matches its
+/// group-title fingerprint. Scored by overlap coefficient (shared titles
+/// over the smaller fingerprint) so a window that gained or lost groups
+/// since the snapshot still matches; at least half of the smaller
+/// fingerprint must persist, and each live window is claimed at most once.
+export function mapStaleWindows(
+  previous: Array<{ title: string; windowId: number }>,
+  live: Array<{ title: string; windowId: number }>,
+): Map<number, number> {
+  const staleTitles = titlesByWindow(previous);
+  const liveTitles = titlesByWindow(live);
+  for (const windowId of liveTitles.keys()) {
+    staleTitles.delete(windowId);
+  }
+
+  const candidates: Array<{ staleId: number; liveId: number; shared: number; score: number }> = [];
+  for (const [staleId, stale] of staleTitles) {
+    for (const [liveId, liveSet] of liveTitles) {
+      let shared = 0;
+      for (const title of stale) {
+        if (liveSet.has(title)) {
+          shared += 1;
+        }
+      }
+      if (shared === 0) {
+        continue;
+      }
+      candidates.push({
+        liveId,
+        score: shared / Math.min(stale.size, liveSet.size),
+        shared,
+        staleId,
+      });
+    }
+  }
+  candidates.sort(
+    (left, right) =>
+      right.score - left.score ||
+      right.shared - left.shared ||
+      left.staleId - right.staleId ||
+      left.liveId - right.liveId,
+  );
+
+  const mapping = new Map<number, number>();
+  const claimed = new Set<number>();
+  for (const candidate of candidates) {
+    if (candidate.score < 0.5) {
+      break;
+    }
+    if (mapping.has(candidate.staleId) || claimed.has(candidate.liveId)) {
+      continue;
+    }
+    mapping.set(candidate.staleId, candidate.liveId);
+    claimed.add(candidate.liveId);
+  }
+  return mapping;
+}
+
+function titlesByWindow(
+  groups: Array<{ title: string; windowId: number }>,
+): Map<number, Set<string>> {
+  const titles = new Map<number, Set<string>>();
+  for (const group of groups) {
+    const title = group.title.trim().toLocaleLowerCase();
+    if (!title) {
+      continue;
+    }
+    const existing = titles.get(group.windowId) ?? new Set<string>();
+    existing.add(title);
+    titles.set(group.windowId, existing);
+  }
+  return titles;
+}
+
+async function retargetCollection(
+  serverUrl: string,
+  token: string,
+  collection: string,
+  field: string,
+  staleId: number,
+  successorId: number,
+  extraFilter = "",
+): Promise<void> {
+  const filter = encodeURIComponent(`(${extraFilter}${field}=${staleId})`);
+  const response = await fetch(
+    `${serverUrl}/api/collections/${collection}/records?filter=${filter}&fields=id&perPage=200`,
+    { headers: { Authorization: token } },
+  );
+  if (!response.ok) {
+    throw new Error(`Loading ${collection} for window healing failed (${response.status}).`);
+  }
+  const data = (await response.json()) as ListResponse<{ id: string }>;
+  for (const item of data.items ?? []) {
+    const patch = await fetch(`${serverUrl}/api/collections/${collection}/records/${item.id}`, {
+      body: JSON.stringify({ [field]: successorId }),
+      headers: { Authorization: token, "Content-Type": "application/json" },
+      method: "PATCH",
+    });
+    if (!patch.ok) {
+      throw new Error(`Retargeting ${collection} ${item.id} failed (${patch.status}).`);
+    }
+  }
+}
+
 async function writeTabGroups(
   serverUrl: string,
   token: string,
@@ -164,6 +308,9 @@ async function writeTabGroups(
     headers: { Authorization: token },
   });
   if (response.ok) {
+    // Heal before the write replaces the previous snapshot — it is the
+    // only remaining record of what the vanished windows held.
+    await healStaleWindowReferences(serverUrl, token, response, groups);
     await patchTabGroups(recordUrl, token, groups);
     return;
   }

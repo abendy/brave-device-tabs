@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BROWSER_GROUPS_RECORD_ID,
   loadSharedLinksDevices,
+  mapStaleWindows,
   markSharedLinksOpened,
   syncTabGroupsToServer,
 } from "../src/popup/shared-links";
@@ -393,5 +394,120 @@ describe("markSharedLinksOpened", () => {
       `https://pocketbase.test/api/collections/browser_groups/records/${BROWSER_GROUPS_RECORD_ID}`,
       expect.objectContaining({ headers: { Authorization: "token" } }),
     );
+  });
+
+  it("retargets pinned groups and links from a vanished window to its fingerprint match", async () => {
+    tabGroupsQueryMock.mockResolvedValueOnce([
+      { collapsed: false, color: "blue", id: 1, shared: false, title: "Research", windowId: 101 },
+    ]);
+    tabsQueryMock.mockResolvedValueOnce([{ groupId: 1, index: 0 } as chrome.tabs.Tab]);
+
+    fetchMock
+      .mockResolvedValueOnce({
+        json: async () => ({
+          groups: [{ color: "blue", index: 0, title: "Research", windowId: 42 }],
+        }),
+        ok: true,
+      })
+      .mockResolvedValueOnce({ json: async () => ({ items: [{ id: "pin1" }] }), ok: true })
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ json: async () => ({ items: [{ id: "link1" }] }), ok: true })
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true });
+
+    await syncTabGroupsToServer();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `https://pocketbase.test/api/collections/pinned_groups/records?filter=${encodeURIComponent("(windowId=42)")}&fields=id&perPage=200`,
+      expect.objectContaining({ headers: { Authorization: "token" } }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "https://pocketbase.test/api/collections/pinned_groups/records/pin1",
+      expect.objectContaining({ body: JSON.stringify({ windowId: 101 }), method: "PATCH" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      `https://pocketbase.test/api/collections/shared_links/records?filter=${encodeURIComponent("(opened=false && destinationWindowId=42)")}&fields=id&perPage=200`,
+      expect.objectContaining({ headers: { Authorization: "token" } }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "https://pocketbase.test/api/collections/shared_links/records/link1",
+      expect.objectContaining({
+        body: JSON.stringify({ destinationWindowId: 101 }),
+        method: "PATCH",
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+});
+
+describe("mapStaleWindows", () => {
+  it("maps a vanished window to the live window sharing its group titles", () => {
+    const mapping = mapStaleWindows(
+      [
+        { title: "Research", windowId: 42 },
+        { title: "Dump", windowId: 42 },
+      ],
+      [
+        { title: " research ", windowId: 101 },
+        { title: "Dump", windowId: 101 },
+      ],
+    );
+
+    expect(mapping).toEqual(new Map([[42, 101]]));
+  });
+
+  it("matches through the smaller fingerprint when a window gained groups", () => {
+    const mapping = mapStaleWindows(
+      [{ title: "Dump", windowId: 42 }],
+      [
+        { title: "Dump", windowId: 101 },
+        { title: "Fresh", windowId: 101 },
+        { title: "Later", windowId: 101 },
+      ],
+    );
+
+    expect(mapping).toEqual(new Map([[42, 101]]));
+  });
+
+  it("gives a live window to the vanished window with the most shared titles", () => {
+    const mapping = mapStaleWindows(
+      [
+        { title: "Alpha", windowId: 42 },
+        { title: "Beta", windowId: 42 },
+        { title: "Alpha", windowId: 43 },
+      ],
+      [
+        { title: "Alpha", windowId: 101 },
+        { title: "Beta", windowId: 101 },
+      ],
+    );
+
+    expect(mapping).toEqual(new Map([[42, 101]]));
+  });
+
+  it("maps nothing below the half-overlap threshold or for surviving ids", () => {
+    expect(
+      mapStaleWindows(
+        [
+          { title: "Alpha", windowId: 42 },
+          { title: "Beta", windowId: 42 },
+          { title: "Gamma", windowId: 42 },
+          { title: "Delta", windowId: 42 },
+        ],
+        [
+          { title: "Alpha", windowId: 101 },
+          { title: "Other", windowId: 101 },
+          { title: "More", windowId: 101 },
+          { title: "Stuff", windowId: 101 },
+        ],
+      ),
+    ).toEqual(new Map());
+    expect(
+      mapStaleWindows([{ title: "Planning", windowId: 7 }], [{ title: "Other", windowId: 7 }]),
+    ).toEqual(new Map());
   });
 });
