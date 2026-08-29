@@ -28,6 +28,16 @@ enum SharedStore {
         serverURL != nil && authToken != nil
     }
 
+    private static let lastQuickSaveChangeCountKey = "lastQuickSaveChangeCount"
+
+    /// The UIPasteboard.changeCount most recently offered (or handled) by
+    /// clipboard quick-save, so reopening the app doesn't re-offer the same
+    /// copied link.
+    static var lastQuickSaveChangeCount: Int {
+        get { defaults?.integer(forKey: lastQuickSaveChangeCountKey) ?? -1 }
+        set { defaults?.set(newValue, forKey: lastQuickSaveChangeCountKey) }
+    }
+
     private static let collapsedShareWindowsKey = "collapsedShareWindows"
 
     /// Window ids whose share-sheet cluster is collapsed. Window ids are
