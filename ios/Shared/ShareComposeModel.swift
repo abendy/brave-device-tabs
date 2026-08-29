@@ -197,6 +197,134 @@ final class ShareComposeModel: ObservableObject {
         onCancel?()
     }
 
+    /// Populates the destination lists (used by both the share extension and
+    /// the app's clipboard quick-save). A dead token would make the fetches
+    /// below return empty instead of failing (SYNC_REVIEW.md finding #10),
+    /// so the session is validated first and surfaced instead. The stored
+    /// token is never cleared from here; only the app owns sign-in state.
+    func loadDestinations() {
+        guard SharedStore.isConfigured else { return }
+
+        Task {
+            let session = await PocketBaseClient.refreshSession()
+            if session == .expired {
+                await MainActor.run {
+                    self.isSessionExpired = true
+                }
+                return
+            }
+            guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
+                return
+            }
+
+            // Best-effort: empty sections just leave "No group" and "New
+            // group…" as the only options, same as if these fetches had
+            // never run.
+            async let liveGroupsTask: [BrowserGroup] = {
+                (try? await PocketBaseClient.fetchBrowserGroups(serverURL: serverURL, token: token)) ?? []
+            }()
+            async let knownDestinationsTask = PocketBaseClient.fetchKnownDestinations(
+                serverURL: serverURL, token: token
+            )
+            async let pinnedGroupsTask = PocketBaseClient.fetchPinnedGroups(
+                serverURL: serverURL, token: token
+            )
+            // Pins lead so their window preference wins deduplication, and
+            // they keep a destination offered even when it has no unopened
+            // links and no live browser group.
+            let pinned = await pinnedGroupsTask.map {
+                PocketBaseClient.KnownDestination(
+                    title: $0.title, windowID: $0.windowID, color: $0.color
+                )
+            }
+            let sections = Self.destinationSections(
+                live: await liveGroupsTask, known: pinned + (await knownDestinationsTask)
+            )
+            await MainActor.run {
+                self.pendingGroups = sections.pending
+                self.windowGroups = sections.byWindow
+            }
+        }
+    }
+
+    /// Mirrors the Links screen's ordering: live groups cluster per window
+    /// (windows ascending, groups by first-tab index then title), and an
+    /// iOS-created destination with no live browser tab group yet renders
+    /// inside its target window's cluster (after the live groups) when that
+    /// window is live — only windowless or stale-window ones lead the list.
+    /// A title duplicated across windows renders in each window's cluster —
+    /// the row destinations carry the window, so the rows stay distinct.
+    private static func destinationSections(
+        live: [BrowserGroup], known: [PocketBaseClient.KnownDestination]
+    ) -> (pending: [DestinationOption], byWindow: [WindowGroupCluster]) {
+        var liveTitles = Set<String>()
+        var seenPerWindow = Set<String>()
+        var groupsByWindow: [Int: [(option: GroupOption, sortIndex: Int)]] = [:]
+
+        for group in live {
+            let title = group.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty,
+                  seenPerWindow.insert("\(group.windowID):\(title.localizedLowercase)").inserted
+            else { continue }
+            liveTitles.insert(title.localizedLowercase)
+            groupsByWindow[group.windowID, default: []].append(
+                (option: GroupOption(title: title, color: group.color), sortIndex: group.index)
+            )
+        }
+
+        let liveWindowIDs = Set(groupsByWindow.keys)
+        var pendingByWindow: [Int: [GroupOption]] = [:]
+        var seenPending = Set<String>()
+        var titlesInClusters = Set<String>()
+        var pending: [DestinationOption] = []
+        let unmatched = known.filter { !liveTitles.contains($0.title.localizedLowercase) }
+        // Windowed entries first, so a windowless duplicate of a title that
+        // already sits in a window's cluster is suppressed rather than
+        // repeated in the top section.
+        for destination in unmatched {
+            guard let windowID = destination.windowID, liveWindowIDs.contains(windowID) else {
+                continue
+            }
+            let key = destination.title.localizedLowercase
+            guard seenPending.insert("\(windowID):\(key)").inserted else { continue }
+            titlesInClusters.insert(key)
+            pendingByWindow[windowID, default: []].append(
+                GroupOption(title: destination.title, color: destination.color)
+            )
+        }
+        for destination in unmatched {
+            if let windowID = destination.windowID, liveWindowIDs.contains(windowID) { continue }
+            let key = destination.title.localizedLowercase
+            guard !titlesInClusters.contains(key), seenPending.insert(key).inserted else { continue }
+            pending.append(
+                DestinationOption(
+                    title: destination.title,
+                    windowID: destination.windowID,
+                    color: destination.color
+                )
+            )
+        }
+        pending.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+
+        let byWindow = groupsByWindow.keys.sorted().map { windowID in
+            WindowGroupCluster(
+                windowID: windowID,
+                groups: (groupsByWindow[windowID] ?? [])
+                    .sorted {
+                        $0.sortIndex == $1.sortIndex
+                            ? $0.option.title.localizedStandardCompare($1.option.title) == .orderedAscending
+                            : $0.sortIndex < $1.sortIndex
+                    }
+                    .map(\.option)
+                    + (pendingByWindow[windowID] ?? []).sorted {
+                        $0.title.localizedStandardCompare($1.title) == .orderedAscending
+                    }
+            )
+        }
+
+        return (pending, byWindow)
+    }
+
     private func resolvedDestination() -> (title: String?, windowID: Int?) {
         switch selectedDestination {
         case .none(let windowID):
