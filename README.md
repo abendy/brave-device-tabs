@@ -79,9 +79,32 @@ pick a destination tab group (synced from the popup's own current
 group instead of as a plain tab — with "no group" always available as a
 fallback.
 
+Groups you rely on can be pinned (long-press a group on the app's Links
+screen, or flip "Pin this group" when creating one from the share sheet).
+A pinned group stays offered as a save destination — keeping its window and
+Chrome color — even after the browser group is closed and its links are
+consumed; saving to it recreates the group in its window on open.
+
 This is off by default — nothing changes until you configure a server via the
 popup's gear icon. Full setup (deploying the server, signing the iOS app,
 connecting the extension) is in [`SETUP.md`](SETUP.md).
+
+### Other ways to save from the iPhone
+
+Beyond the share sheet:
+
+- **Clipboard quick-save** — open the Device Tabs Share app with a link on
+  the clipboard and a "Save copied link…" button appears; one tap opens the
+  same compose sheet. Detection uses the banner-free clipboard APIs, so the
+  system paste notice only shows after you tap. Each copied link is offered
+  once, whether saved or dismissed.
+- **Shortcuts** — the app provides a "Save Link to Device Tabs" action that
+  saves without opening the app, with group suggestions from pinned and live
+  browser groups. For a copy-then-save flow, create a shortcut of
+  **Get Clipboard → Save Link to Device Tabs**, then bind it to Back Tap
+  (Settings → Accessibility → Touch → Back Tap) or the Action Button:
+  copy anywhere, trigger, saved. The action can take a minute to appear in
+  Shortcuts after a fresh install while iOS indexes it.
 
 ## Troubleshooting
 
