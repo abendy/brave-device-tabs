@@ -11,6 +11,8 @@ struct LinksView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var links: [SharedLink] = []
     @State private var browserGroups: [BrowserGroup] = []
+    @State private var pinnedGroups: [PocketBaseClient.PinnedGroup] = []
+    @State private var pinErrorMessage: String?
     @State private var isLoading = true
     @State private var isSessionExpired = false
     @State private var errorMessage: String?
@@ -72,6 +74,17 @@ struct LinksView: View {
                     Button("OK", role: .cancel) {}
                 } message: {
                     Text(deleteErrorMessage ?? "The link could not be deleted.")
+                }
+                .alert(
+                    "Couldn't update pin",
+                    isPresented: Binding(
+                        get: { pinErrorMessage != nil },
+                        set: { if !$0 { pinErrorMessage = nil } }
+                    )
+                ) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text(pinErrorMessage ?? "The pin could not be updated.")
                 }
         }
     }
@@ -163,7 +176,9 @@ struct LinksView: View {
                             dragContext: $dragContext,
                             onDrop: move,
                             onDelete: delete,
-                            newGroup: newGroupConfiguration(for: window)
+                            newGroup: newGroupConfiguration(for: window),
+                            isPinned: isPinned,
+                            onTogglePin: togglePin
                         )
                     }
                 }
@@ -366,6 +381,35 @@ struct LinksView: View {
             )
         }
 
+        // Pinned groups are standing fixtures: they render (empty if need
+        // be) even when the browser group is closed and no links point at
+        // them — under their window while it is live, in Other groups
+        // otherwise — so there is always somewhere to drop.
+        for pin in pinnedGroups {
+            guard let title = normalizedDestination(pin.title) else { continue }
+            let key = title.localizedLowercase
+            if let windowID = pin.windowID, liveWindowIDs.contains(windowID) {
+                let sectionID = "window:\(windowID):group:\(key)"
+                guard !(groupsByWindow[windowID] ?? []).contains(where: { $0.id == sectionID }) else {
+                    continue
+                }
+                groupsByWindow[windowID, default: []].append(
+                    LinkSection(
+                        id: sectionID,
+                        title: title,
+                        sortIndex: .max,
+                        color: nil,
+                        destination: title,
+                        destinationWindowID: windowID,
+                        links: []
+                    )
+                )
+            } else if windowsByTitle[key] == nil,
+                      !unknownBuckets.contains(where: { $0.displayTitle.localizedLowercase == key }) {
+                unknownBuckets.append(DestinationBucket(displayTitle: title, links: []))
+            }
+        }
+
         // Every live window gets its own No group bucket, first in its list
         // (sortIndex .min beats every live group), so links can target a
         // window without joining or creating a tab group there.
@@ -482,6 +526,41 @@ struct LinksView: View {
             get: { newGroupNamesByGroup[groupKey] ?? "" },
             set: { newGroupNamesByGroup[groupKey] = $0 }
         )
+    }
+
+    /// Pins match on title alone: a pin whose window has died still reads as
+    /// pinned from wherever its section renders, and unpinning removes every
+    /// same-titled pin.
+    private func isPinned(_ section: LinkSection) -> Bool {
+        let key = section.title.localizedLowercase
+        return pinnedGroups.contains { $0.title.localizedLowercase == key }
+    }
+
+    private func togglePin(_ section: LinkSection) {
+        let key = section.title.localizedLowercase
+        let existing = pinnedGroups.filter { $0.title.localizedLowercase == key }
+
+        Task {
+            do {
+                if existing.isEmpty {
+                    try await PocketBaseClient.createPinnedGroup(
+                        title: section.title, windowID: section.destinationWindowID
+                    )
+                } else {
+                    for pin in existing {
+                        try await PocketBaseClient.deletePinnedGroup(id: pin.id)
+                    }
+                }
+                guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
+                    return
+                }
+                pinnedGroups = await PocketBaseClient.fetchPinnedGroups(
+                    serverURL: serverURL, token: token
+                )
+            } catch {
+                pinErrorMessage = error.localizedDescription
+            }
+        }
     }
 
     private func stage(linkID: String, for groupKey: String) {
@@ -603,9 +682,13 @@ struct LinksView: View {
                 return .failure(error)
             }
         }()
-        let (linksResult, browserGroupsResult) = await (linksTask, browserGroupsTask)
+        // Best-effort: a pin fetch failure just hides pinned fixtures until
+        // the next refresh.
+        async let pinnedTask = PocketBaseClient.fetchPinnedGroups(serverURL: serverURL, token: token)
+        let (linksResult, browserGroupsResult, fetchedPins) = await (linksTask, browserGroupsTask, pinnedTask)
 
         guard loadCoordinator.isCurrent(generation) else { return }
+        pinnedGroups = fetchedPins
 
         var nextErrorMessage: String?
         switch linksResult {
@@ -657,6 +740,8 @@ private struct WindowGroupDisclosure: View {
     let onDrop: (_ linkID: String, _ destination: String?, _ windowID: Int?) -> Void
     let onDelete: (_ linkID: String) -> Void
     let newGroup: NewGroupConfiguration?
+    let isPinned: (_ section: LinksView.LinkSection) -> Bool
+    let onTogglePin: (_ section: LinksView.LinkSection) -> Void
 
     private var totalLinkCount: Int {
         window.groups.reduce(0) { $0 + $1.links.count }
@@ -668,10 +753,25 @@ private struct WindowGroupDisclosure: View {
                 ForEach(window.groups) { group in
                     TabGroupDisclosure(
                         group: group,
+                        isPinned: group.destination != nil && isPinned(group),
                         dragContext: $dragContext,
                         onDrop: onDrop,
                         onDelete: onDelete
                     )
+                    // The No group bucket is a fixture already; only real
+                    // groups can be pinned.
+                    .contextMenu {
+                        if group.destination != nil {
+                            Button {
+                                onTogglePin(group)
+                            } label: {
+                                Label(
+                                    isPinned(group) ? "Unpin Group" : "Pin Group",
+                                    systemImage: isPinned(group) ? "pin.slash" : "pin"
+                                )
+                            }
+                        }
+                    }
                 }
                 if let newGroup {
                     VStack(alignment: .leading, spacing: 8) {
@@ -738,6 +838,7 @@ private struct WindowGroupDisclosure: View {
 
 private struct TabGroupDisclosure: View {
     let group: LinksView.LinkSection
+    let isPinned: Bool
     @Binding var dragContext: LinkDragContext?
     let onDrop: (_ linkID: String, _ destination: String?, _ windowID: Int?) -> Void
     let onDelete: (_ linkID: String) -> Void
@@ -762,6 +863,11 @@ private struct TabGroupDisclosure: View {
                 GroupColorDot(colorName: group.color)
                 Text(group.title)
                     .font(.subheadline.weight(.semibold))
+                if isPinned {
+                    Image(systemName: "pin.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Text("\(group.links.count)")
                     .font(.caption.monospacedDigit())

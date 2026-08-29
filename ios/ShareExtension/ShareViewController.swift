@@ -65,8 +65,17 @@ final class ShareViewController: UIViewController {
             async let knownDestinationsTask = PocketBaseClient.fetchKnownDestinations(
                 serverURL: serverURL, token: token
             )
+            async let pinnedGroupsTask = PocketBaseClient.fetchPinnedGroups(
+                serverURL: serverURL, token: token
+            )
+            // Pins lead so their window preference wins deduplication, and
+            // they keep a destination offered even when it has no unopened
+            // links and no live browser group.
+            let pinned = await pinnedGroupsTask.map {
+                PocketBaseClient.KnownDestination(title: $0.title, windowID: $0.windowID)
+            }
             let sections = Self.destinationSections(
-                live: await liveGroupsTask, known: await knownDestinationsTask
+                live: await liveGroupsTask, known: pinned + (await knownDestinationsTask)
             )
             await MainActor.run {
                 self.model.pendingGroups = sections.pending
@@ -109,22 +118,32 @@ final class ShareViewController: UIViewController {
         let liveWindowIDs = Set(groupsByWindow.keys)
         var pendingByWindow: [Int: [ShareComposeModel.GroupOption]] = [:]
         var seenPending = Set<String>()
+        var titlesInClusters = Set<String>()
         var pending: [ShareComposeModel.DestinationOption] = []
-        for destination in known where !liveTitles.contains(destination.title.localizedLowercase) {
-            if let windowID = destination.windowID, liveWindowIDs.contains(windowID) {
-                guard seenPending.insert("\(windowID):\(destination.title.localizedLowercase)").inserted
-                else { continue }
-                pendingByWindow[windowID, default: []].append(
-                    ShareComposeModel.GroupOption(title: destination.title, color: nil)
-                )
-            } else {
-                guard seenPending.insert(destination.title.localizedLowercase).inserted else { continue }
-                pending.append(
-                    ShareComposeModel.DestinationOption(
-                        title: destination.title, windowID: destination.windowID
-                    )
-                )
+        let unmatched = known.filter { !liveTitles.contains($0.title.localizedLowercase) }
+        // Windowed entries first, so a windowless duplicate of a title that
+        // already sits in a window's cluster is suppressed rather than
+        // repeated in the top section.
+        for destination in unmatched {
+            guard let windowID = destination.windowID, liveWindowIDs.contains(windowID) else {
+                continue
             }
+            let key = destination.title.localizedLowercase
+            guard seenPending.insert("\(windowID):\(key)").inserted else { continue }
+            titlesInClusters.insert(key)
+            pendingByWindow[windowID, default: []].append(
+                ShareComposeModel.GroupOption(title: destination.title, color: nil)
+            )
+        }
+        for destination in unmatched {
+            if let windowID = destination.windowID, liveWindowIDs.contains(windowID) { continue }
+            let key = destination.title.localizedLowercase
+            guard !titlesInClusters.contains(key), seenPending.insert(key).inserted else { continue }
+            pending.append(
+                ShareComposeModel.DestinationOption(
+                    title: destination.title, windowID: destination.windowID
+                )
+            )
         }
         pending.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
 

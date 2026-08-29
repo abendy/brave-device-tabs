@@ -339,6 +339,91 @@ enum PocketBaseClient {
         let windowID: Int?
     }
 
+    struct PinnedGroup: Identifiable, Decodable, Equatable {
+        let id: String
+        let title: String
+        let windowID: Int?
+
+        private enum CodingKeys: String, CodingKey {
+            case id, title
+            case windowID = "windowId"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(String.self, forKey: .id)
+            title = try container.decode(String.self, forKey: .title)
+            // PocketBase number fields read back 0 when unset.
+            let windowID = try container.decodeIfPresent(Int.self, forKey: .windowID) ?? 0
+            self.windowID = windowID > 0 ? windowID : nil
+        }
+    }
+
+    /// Best-effort like `fetchKnownDestinations`: a failure must never block
+    /// sharing, it just leaves the pinned destinations out of the list.
+    static func fetchPinnedGroups(serverURL: URL, token: String) async -> [PinnedGroup] {
+        guard var components = URLComponents(
+            url: serverURL.appendingPathComponent("api/collections/pinned_groups/records"),
+            resolvingAgainstBaseURL: false
+        ) else { return [] }
+        components.queryItems = [
+            URLQueryItem(name: "sort", value: "title"),
+            URLQueryItem(name: "perPage", value: String(sharedLinksPageSize)),
+        ]
+        guard let url = components.url else { return [] }
+
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.setValue(token, forHTTPHeaderField: "Authorization")
+
+        guard
+            let (data, response) = try? await URLSession.shared.data(for: request),
+            let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+            let list = try? JSONDecoder().decode(PocketBaseListResponse<PinnedGroup>.self, from: data)
+        else { return [] }
+        return list.items
+    }
+
+    static func createPinnedGroup(title: String, windowID: Int?) async throws {
+        guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
+            throw PocketBaseError.notConfigured
+        }
+
+        var request = URLRequest(url: serverURL.appendingPathComponent("api/collections/pinned_groups/records"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(token, forHTTPHeaderField: "Authorization")
+        struct Payload: Encodable {
+            let title: String
+            let windowId: Int
+        }
+        request.httpBody = try JSONEncoder().encode(Payload(title: title, windowId: windowID ?? 0))
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw PocketBaseError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            throw PocketBaseError.server(errorMessage(from: data) ?? "Could not pin the group (\(http.statusCode)).")
+        }
+    }
+
+    static func deletePinnedGroup(id: String) async throws {
+        guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
+            throw PocketBaseError.notConfigured
+        }
+
+        var request = URLRequest(
+            url: serverURL.appendingPathComponent("api/collections/pinned_groups/records/\(id)")
+        )
+        request.httpMethod = "DELETE"
+        request.setValue(token, forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw PocketBaseError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) || http.statusCode == 404 else {
+            throw PocketBaseError.server(errorMessage(from: data) ?? "Could not unpin the group (\(http.statusCode)).")
+        }
+    }
+
     /// Best-effort — a failure here must never block sharing. Covers group
     /// names created purely on iOS (via LinksView's New Group card or a prior
     /// "New group…" share) that have never synced back as a live browser tab
