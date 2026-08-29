@@ -3,6 +3,7 @@ import SwiftUI
 struct ShareComposeView: View {
     @ObservedObject var model: ShareComposeModel
     @FocusState private var isGroupNameFocused: Bool
+    @State private var collapsedWindowIDs: Set<Int> = SharedStore.collapsedShareWindowIDs
 
     var body: some View {
         NavigationStack {
@@ -21,6 +22,15 @@ struct ShareComposeView: View {
                                 .foregroundStyle(.secondary)
                             } icon: {
                                 Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                            }
+                            .font(.subheadline)
+                        } else if model.previouslySaved != nil {
+                            Label {
+                                Text("Previously saved and opened — saving keeps a fresh copy")
+                                    .foregroundStyle(.secondary)
+                            } icon: {
+                                Image(systemName: "clock.arrow.circlepath")
                                     .foregroundStyle(.orange)
                             }
                             .font(.subheadline)
@@ -55,6 +65,7 @@ struct ShareComposeView: View {
                         if case .new(let windowID) = model.selectedDestination, windowID == nil {
                             TextField("Group name", text: $model.newGroupName)
                                 .focused($isGroupNameFocused)
+                                .onSubmit(model.post)
                             Toggle("Pin this group", isOn: $model.pinNewGroup)
                                 .font(.subheadline)
                         }
@@ -74,36 +85,49 @@ struct ShareComposeView: View {
                         }
                     }
 
-                    ForEach(model.windowGroups, id: \.windowID) { cluster in
+                    ForEach(
+                        Array(model.windowGroups.enumerated()), id: \.element.windowID
+                    ) { index, cluster in
                         Section {
-                            ForEach(cluster.groups, id: \.self) { group in
+                            DisclosureGroup(isExpanded: isExpandedBinding(for: cluster.windowID)) {
+                                ForEach(cluster.groups, id: \.self) { group in
+                                    destinationRow(
+                                        title: group.title,
+                                        destination: .existing(
+                                            title: group.title, windowID: cluster.windowID
+                                        ),
+                                        colorName: group.color
+                                    )
+                                }
                                 destinationRow(
-                                    title: group.title,
-                                    destination: .existing(
-                                        title: group.title, windowID: cluster.windowID
-                                    ),
-                                    colorName: group.color
+                                    title: "No group here",
+                                    destination: .none(windowID: cluster.windowID),
+                                    showsColorDot: false,
+                                    usesAccentColor: true
                                 )
+                                destinationRow(
+                                    title: "New group here…",
+                                    destination: .new(windowID: cluster.windowID),
+                                    showsColorDot: false,
+                                    usesAccentColor: true
+                                )
+                                if case .new(let windowID) = model.selectedDestination,
+                                   windowID == cluster.windowID {
+                                    TextField("Group name", text: $model.newGroupName)
+                                        .focused($isGroupNameFocused)
+                                        .onSubmit(model.post)
+                                    Toggle("Pin this group", isOn: $model.pinNewGroup)
+                                        .font(.subheadline)
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "macwindow")
+                                        .foregroundStyle(.secondary)
+                                    Text("Window \(index + 1)")
+                                        .font(.subheadline.weight(.semibold))
+                                }
                             }
-                            destinationRow(
-                                title: "No group here",
-                                destination: .none(windowID: cluster.windowID),
-                                showsColorDot: false,
-                                usesAccentColor: true
-                            )
-                            destinationRow(
-                                title: "New group here…",
-                                destination: .new(windowID: cluster.windowID),
-                                showsColorDot: false,
-                                usesAccentColor: true
-                            )
-                            if case .new(let windowID) = model.selectedDestination,
-                               windowID == cluster.windowID {
-                                TextField("Group name", text: $model.newGroupName)
-                                    .focused($isGroupNameFocused)
-                                Toggle("Pin this group", isOn: $model.pinNewGroup)
-                                    .font(.subheadline)
-                            }
+                            .tint(.secondary)
                         }
                     }
                 }
@@ -132,7 +156,9 @@ struct ShareComposeView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     if model.isPosting {
                         ProgressView()
-                    } else {
+                    } else if model.isNewGroupSelected {
+                        // Every other destination saves on tap; only a new
+                        // group needs this explicit commit once named.
                         Button(model.duplicateOf == nil ? "Post" : "Move", action: model.post)
                             .disabled(
                                 !model.isConfigured || model.isSessionExpired
@@ -173,6 +199,23 @@ struct ShareComposeView: View {
         }
     }
 
+    /// Collapse state persists in the shared suite so it survives share
+    /// sheet invocations; a stale window id just leaves its replacement
+    /// expanded.
+    private func isExpandedBinding(for windowID: Int) -> Binding<Bool> {
+        Binding(
+            get: { !collapsedWindowIDs.contains(windowID) },
+            set: { expanded in
+                if expanded {
+                    collapsedWindowIDs.remove(windowID)
+                } else {
+                    collapsedWindowIDs.insert(windowID)
+                }
+                SharedStore.collapsedShareWindowIDs = collapsedWindowIDs
+            }
+        )
+    }
+
     private func destinationRow(
         title: String,
         destination: ShareComposeModel.Destination,
@@ -181,7 +224,7 @@ struct ShareComposeView: View {
         usesAccentColor: Bool = false
     ) -> some View {
         Button {
-            model.selectedDestination = destination
+            model.select(destination)
         } label: {
             HStack(spacing: 12) {
                 if showsColorDot {

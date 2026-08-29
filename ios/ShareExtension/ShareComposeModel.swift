@@ -46,8 +46,12 @@ final class ShareComposeModel: ObservableObject {
     @Published var isSessionExpired = false
     @Published var saveErrorMessage: String?
     /// An unopened link with the same URL, when one already exists; drives
-    /// the "Already saved" banner and the Save Anyway button title.
+    /// the "Already saved" banner, and posting moves it instead of saving a
+    /// second copy.
     @Published var duplicateOf: SharedLink?
+    /// A consumed (opened) link with the same URL, when no unopened one
+    /// exists; warn-only — posting still saves a fresh copy.
+    @Published var previouslySaved: SharedLink?
     /// Non-nil once the save succeeded; the sheet shows this confirmation
     /// briefly and then dismisses itself.
     @Published var savedSummary: String?
@@ -64,9 +68,25 @@ final class ShareComposeModel: ObservableObject {
         return newGroupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// Keeps the Post button offered only for "New group…", which needs a
+    /// name typed before it can save; every other row saves on tap.
+    var isNewGroupSelected: Bool {
+        guard case .new = selectedDestination else { return false }
+        return true
+    }
+
+    /// Tapping a destination saves immediately — except "New group…",
+    /// which only selects so the name field can appear.
+    func select(_ destination: Destination) {
+        selectedDestination = destination
+        if case .new = destination { return }
+        post()
+    }
+
     func post() {
-        guard let sharedURL else {
-            onComplete?()
+        // The guards keep a tap harmless while the URL is still loading, a
+        // save is in flight or confirmed, or the new group has no name yet.
+        guard !isPosting, savedSummary == nil, !isNewGroupNameMissing, let sharedURL else {
             return
         }
 
@@ -140,10 +160,16 @@ final class ShareComposeModel: ObservableObject {
             // failing (SYNC_REVIEW.md finding #10) — validate first so a
             // missing banner can't just mean a silently dead session.
             guard await PocketBaseClient.refreshSession() == .valid else { return }
-            let existing = (try? await PocketBaseClient.findSharedLink(url: urlString)) ?? nil
+            let unopened = (try? await PocketBaseClient.findSharedLink(url: urlString)) ?? nil
+            // Only when nothing movable exists is a consumed copy worth a
+            // warn-only banner.
+            let consumed = unopened == nil
+                ? (try? await PocketBaseClient.findSharedLink(url: urlString, includeOpened: true)) ?? nil
+                : nil
             await MainActor.run {
                 guard self.sharedURL?.absoluteString == urlString else { return }
-                self.duplicateOf = existing
+                self.duplicateOf = unopened
+                self.previouslySaved = consumed
             }
         }
     }
