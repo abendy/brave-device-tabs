@@ -227,11 +227,13 @@ enum PocketBaseClient {
         return links
     }
 
-    /// First unopened link with this exact URL, for duplicate warnings before
-    /// a share. Callers treat failures as "no duplicate found" — reads with a
-    /// dead token come back empty rather than failing (SYNC_REVIEW.md finding
-    /// #10), so validate the session first for a trustworthy answer.
-    static func findSharedLink(url: String) async throws -> SharedLink? {
+    /// First link with this exact URL, for duplicate warnings before a
+    /// share — unopened only when `includeOpened` is false (those can be
+    /// moved), any record otherwise (a consumed one still warrants a
+    /// warning). Callers treat failures as "no duplicate found" — reads with
+    /// a dead token come back empty rather than failing (SYNC_REVIEW.md
+    /// finding #10), so validate the session first for a trustworthy answer.
+    static func findSharedLink(url: String, includeOpened: Bool = false) async throws -> SharedLink? {
         guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
             throw PocketBaseError.notConfigured
         }
@@ -242,8 +244,10 @@ enum PocketBaseClient {
         let escaped = url
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "'", with: "\\'")
+        let openedClause = includeOpened ? "" : "opened=false && "
         components.queryItems = [
-            URLQueryItem(name: "filter", value: "(opened=false && url='\(escaped)')"),
+            URLQueryItem(name: "filter", value: "(\(openedClause)url='\(escaped)')"),
+            URLQueryItem(name: "sort", value: "-created"),
             URLQueryItem(name: "perPage", value: "1"),
         ]
         guard let requestURL = components.url else { throw PocketBaseError.invalidResponse }
