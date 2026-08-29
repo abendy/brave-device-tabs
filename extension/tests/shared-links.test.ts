@@ -226,8 +226,10 @@ describe("markSharedLinksOpened", () => {
     fetchMock
       .mockResolvedValueOnce({ ok: true })
       .mockReturnValueOnce(firstWrite)
+      .mockResolvedValueOnce({ ok: false }) // pin-color backfill skipped
       .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ ok: true });
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: false }); // pin-color backfill skipped
 
     const firstSync = syncTabGroupsToServer();
     const secondSync = syncTabGroupsToServer();
@@ -241,7 +243,7 @@ describe("markSharedLinksOpened", () => {
 
     expect(tabGroupsQueryMock).toHaveBeenCalledTimes(2);
     expect(tabsQueryMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       `https://pocketbase.test/api/collections/browser_groups/records/${BROWSER_GROUPS_RECORD_ID}`,
@@ -253,7 +255,7 @@ describe("markSharedLinksOpened", () => {
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      4,
+      5,
       `https://pocketbase.test/api/collections/browser_groups/records/${BROWSER_GROUPS_RECORD_ID}`,
       expect.objectContaining({
         body: JSON.stringify({
@@ -413,7 +415,8 @@ describe("markSharedLinksOpened", () => {
       .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({ json: async () => ({ items: [{ id: "link1" }] }), ok: true })
       .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ ok: true });
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: false }); // pin-color backfill skipped
 
     await syncTabGroupsToServer();
 
@@ -440,7 +443,32 @@ describe("markSharedLinksOpened", () => {
         method: "PATCH",
       }),
     );
-    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+  });
+
+  it("backfills a pin's color from its matching live group", async () => {
+    tabGroupsQueryMock.mockResolvedValueOnce([
+      { collapsed: false, color: "purple", id: 1, shared: false, title: "Research", windowId: 7 },
+    ]);
+    tabsQueryMock.mockResolvedValueOnce([{ groupId: 1, index: 0 } as chrome.tabs.Tab]);
+
+    fetchMock
+      .mockResolvedValueOnce({ json: async () => ({ groups: [] }), ok: true })
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({
+        json: async () => ({ items: [{ color: "", id: "pin1", title: "research", windowId: 7 }] }),
+        ok: true,
+      })
+      .mockResolvedValueOnce({ ok: true });
+
+    await syncTabGroupsToServer();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "https://pocketbase.test/api/collections/pinned_groups/records/pin1",
+      expect.objectContaining({ body: JSON.stringify({ color: "purple" }), method: "PATCH" }),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 });
 

@@ -17,6 +17,9 @@ final class ShareComposeModel: ObservableObject {
     struct DestinationOption: Hashable {
         let title: String
         let windowID: Int?
+        /// Remembered Chrome color for pinned destinations; nil renders the
+        /// neutral dot.
+        var color: String?
     }
 
     struct GroupOption: Hashable {

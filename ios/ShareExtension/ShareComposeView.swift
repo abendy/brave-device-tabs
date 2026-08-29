@@ -79,7 +79,7 @@ struct ShareComposeView: View {
                                     destination: .existing(
                                         title: option.title, windowID: option.windowID
                                     ),
-                                    colorName: nil
+                                    colorName: option.color
                                 )
                             }
                         }

@@ -146,6 +146,54 @@ async function performTabGroupSync(): Promise<void> {
       : [];
   });
   await writeTabGroups(serverUrl, token, groups);
+  await backfillPinnedGroupColors(serverUrl, token, groups);
+}
+
+/// The browser is the color authority: pins remember their group's Chrome
+/// color so a pinned destination keeps its dot after the live group closes.
+/// Each sync copies the color of a pin's matching live group (same title;
+/// same window preferred) onto pins whose stored color differs.
+/// Best-effort like healing.
+async function backfillPinnedGroupColors(
+  serverUrl: string,
+  token: string,
+  liveGroups: Array<{ color: string; title: string; windowId: number }>,
+): Promise<void> {
+  try {
+    const response = await fetch(`${serverUrl}/api/collections/pinned_groups/records?perPage=200`, {
+      headers: { Authorization: token },
+    });
+    if (!response.ok) {
+      return;
+    }
+    const data = (await response.json()) as ListResponse<{
+      color?: string;
+      id: string;
+      title?: string;
+      windowId?: number;
+    }>;
+    for (const pin of data.items ?? []) {
+      const key = pin.title?.trim().toLocaleLowerCase();
+      if (!key) {
+        continue;
+      }
+      const matches = liveGroups.filter((group) => group.title.trim().toLocaleLowerCase() === key);
+      const match = matches.find((group) => group.windowId === pin.windowId) ?? matches[0];
+      if (!match || match.color === pin.color) {
+        continue;
+      }
+      const patch = await fetch(`${serverUrl}/api/collections/pinned_groups/records/${pin.id}`, {
+        body: JSON.stringify({ color: match.color }),
+        headers: { Authorization: token, "Content-Type": "application/json" },
+        method: "PATCH",
+      });
+      if (!patch.ok) {
+        throw new Error(`Backfilling pin color for ${pin.id} failed (${patch.status}).`);
+      }
+    }
+  } catch (error) {
+    console.warn("Pin color backfill skipped:", error);
+  }
 }
 
 /// Browser restarts reassign window ids, stranding pinned groups and

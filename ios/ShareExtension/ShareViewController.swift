@@ -72,7 +72,9 @@ final class ShareViewController: UIViewController {
             // they keep a destination offered even when it has no unopened
             // links and no live browser group.
             let pinned = await pinnedGroupsTask.map {
-                PocketBaseClient.KnownDestination(title: $0.title, windowID: $0.windowID)
+                PocketBaseClient.KnownDestination(
+                    title: $0.title, windowID: $0.windowID, color: $0.color
+                )
             }
             let sections = Self.destinationSections(
                 live: await liveGroupsTask, known: pinned + (await knownDestinationsTask)
@@ -132,7 +134,7 @@ final class ShareViewController: UIViewController {
             guard seenPending.insert("\(windowID):\(key)").inserted else { continue }
             titlesInClusters.insert(key)
             pendingByWindow[windowID, default: []].append(
-                ShareComposeModel.GroupOption(title: destination.title, color: nil)
+                ShareComposeModel.GroupOption(title: destination.title, color: destination.color)
             )
         }
         for destination in unmatched {
@@ -141,7 +143,9 @@ final class ShareViewController: UIViewController {
             guard !titlesInClusters.contains(key), seenPending.insert(key).inserted else { continue }
             pending.append(
                 ShareComposeModel.DestinationOption(
-                    title: destination.title, windowID: destination.windowID
+                    title: destination.title,
+                    windowID: destination.windowID,
+                    color: destination.color
                 )
             )
         }

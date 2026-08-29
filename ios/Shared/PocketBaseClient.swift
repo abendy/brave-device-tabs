@@ -341,15 +341,25 @@ enum PocketBaseClient {
     struct KnownDestination: Equatable {
         let title: String
         let windowID: Int?
+        let color: String?
+
+        init(title: String, windowID: Int?, color: String? = nil) {
+            self.title = title
+            self.windowID = windowID
+            self.color = color
+        }
     }
 
     struct PinnedGroup: Identifiable, Decodable, Equatable {
         let id: String
         let title: String
         let windowID: Int?
+        /// Chrome color of the pinned group, backfilled by the extension
+        /// from the live group; nil when never seen live (or colorless).
+        let color: String?
 
         private enum CodingKeys: String, CodingKey {
-            case id, title
+            case id, title, color
             case windowID = "windowId"
         }
 
@@ -357,9 +367,12 @@ enum PocketBaseClient {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             id = try container.decode(String.self, forKey: .id)
             title = try container.decode(String.self, forKey: .title)
-            // PocketBase number fields read back 0 when unset.
+            // PocketBase number fields read back 0 when unset, and text
+            // fields "" — normalize both to nil.
             let windowID = try container.decodeIfPresent(Int.self, forKey: .windowID) ?? 0
             self.windowID = windowID > 0 ? windowID : nil
+            let color = try container.decodeIfPresent(String.self, forKey: .color) ?? ""
+            self.color = color.isEmpty ? nil : color
         }
     }
 
@@ -388,7 +401,7 @@ enum PocketBaseClient {
         return list.items
     }
 
-    static func createPinnedGroup(title: String, windowID: Int?) async throws {
+    static func createPinnedGroup(title: String, windowID: Int?, color: String? = nil) async throws {
         guard let serverURL = SharedStore.serverURL, let token = SharedStore.authToken else {
             throw PocketBaseError.notConfigured
         }
@@ -400,8 +413,11 @@ enum PocketBaseClient {
         struct Payload: Encodable {
             let title: String
             let windowId: Int
+            let color: String?
         }
-        request.httpBody = try JSONEncoder().encode(Payload(title: title, windowId: windowID ?? 0))
+        request.httpBody = try JSONEncoder().encode(
+            Payload(title: title, windowId: windowID ?? 0, color: color)
+        )
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw PocketBaseError.invalidResponse }

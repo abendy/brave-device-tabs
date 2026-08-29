@@ -303,6 +303,17 @@ struct LinksView: View {
         var slots: [(windowID: Int, title: String, key: String, sortIndex: Int, color: String?)] = []
         var windowsByTitle: [String: [Int]] = [:]
         let liveWindowIDs = Set(browserGroups.map(\.windowID))
+        // A pin's remembered Chrome color keeps its group's dot wherever the
+        // section would otherwise render colorless.
+        let pinColorsByTitle = Dictionary(
+            pinnedGroups.compactMap { pin -> (String, String)? in
+                guard let color = pin.color, let title = normalizedDestination(pin.title) else {
+                    return nil
+                }
+                return (title.localizedLowercase, color)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         for group in browserGroups {
             guard let title = normalizedDestination(group.title) else { continue }
@@ -339,7 +350,7 @@ struct LinksView: View {
                             id: "window:\(windowID):group:\(key)",
                             title: bucket.displayTitle,
                             sortIndex: .max,
-                            color: nil,
+                            color: pinColorsByTitle[key],
                             destination: bucket.displayTitle,
                             destinationWindowID: windowID,
                             links: links
@@ -398,7 +409,7 @@ struct LinksView: View {
                         id: sectionID,
                         title: title,
                         sortIndex: .max,
-                        color: nil,
+                        color: pin.color,
                         destination: title,
                         destinationWindowID: windowID,
                         links: []
@@ -444,7 +455,7 @@ struct LinksView: View {
                             id: "window:unknown:group:\(bucket.displayTitle.localizedLowercase)",
                             title: bucket.displayTitle,
                             sortIndex: .max,
-                            color: nil,
+                            color: pinColorsByTitle[bucket.displayTitle.localizedLowercase],
                             destination: bucket.displayTitle,
                             destinationWindowID: nil,
                             links: bucket.links
@@ -544,7 +555,9 @@ struct LinksView: View {
             do {
                 if existing.isEmpty {
                     try await PocketBaseClient.createPinnedGroup(
-                        title: section.title, windowID: section.destinationWindowID
+                        title: section.title,
+                        windowID: section.destinationWindowID,
+                        color: section.color
                     )
                 } else {
                     for pin in existing {
