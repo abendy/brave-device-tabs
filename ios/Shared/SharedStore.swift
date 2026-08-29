@@ -27,4 +27,14 @@ enum SharedStore {
     static var isConfigured: Bool {
         serverURL != nil && authToken != nil
     }
+
+    private static let collapsedShareWindowsKey = "collapsedShareWindows"
+
+    /// Window ids whose share-sheet cluster is collapsed. Window ids are
+    /// ephemeral across browser restarts, so stale entries simply stop
+    /// matching and the replacement window starts expanded (the default).
+    static var collapsedShareWindowIDs: Set<Int> {
+        get { Set(defaults?.array(forKey: collapsedShareWindowsKey) as? [Int] ?? []) }
+        set { defaults?.set(Array(newValue).sorted(), forKey: collapsedShareWindowsKey) }
+    }
 }
