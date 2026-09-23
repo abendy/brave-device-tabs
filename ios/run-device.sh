@@ -28,7 +28,7 @@ if [[ -d "$XCODE_PROFILES" ]]; then
   cp -n "$XCODE_PROFILES"/*.mobileprovision "$LEGACY_PROFILES/" 2>/dev/null || true
 fi
 
-DEVICE_ID=$(xcrun devicectl list devices 2>/dev/null | awk 'NR>2 && /paired/ {print $3; exit}')
+DEVICE_ID=$(xcrun devicectl list devices 2>/dev/null | awk 'NR>2 && (/paired/ || / connected /) {print $3; exit}')
 if [[ -z "$DEVICE_ID" ]]; then
   echo "No paired iOS device found. Connect one (USB or Wi-Fi), unlock it, and trust this Mac." >&2
   exit 1
