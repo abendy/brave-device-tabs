@@ -131,12 +131,6 @@ struct ShareComposeView: View {
                         }
                     }
                 }
-
-                Section {
-                    Text("\(DeploymentMarker.word) deployment")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
             }
             .navigationTitle("Save to Device Tabs")
             .navigationBarTitleDisplayMode(.inline)
