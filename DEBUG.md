@@ -76,3 +76,20 @@ simulator-specific.
   that the view body reads until *after* all the async work in `load()`
   completes — assign `links`/`groupTitles` together at the end, and only
   flip `isLoading` when there's genuinely nothing on screen yet.
+
+## Beyond iOS
+
+- **An expired PocketBase token looks like empty data, not an error.**
+  PocketBase treats a request with a dead token as a guest, and list rules
+  filter rather than gate: a failing `@request.auth.id != ''` rule returns
+  HTTP 200 with `items: []`, never 401. Every client then shows a clean,
+  empty list. Creates are gated, so saves do fail. When data "vanishes" or
+  a picker is empty, check the token first: decode the JWT `exp` stored in
+  the App Group (`pocketbaseAuthToken`), or POST `users/auth-refresh`
+  (401 means dead). Never read a 200-empty list as "no data" until auth is
+  confirmed.
+- **"Still broken" after a fix can be a stale extension build.** Brave runs
+  the unpacked extension from `extension/dist/`, which tests and lint never
+  touch. Compare `stat extension/dist/background.js` with the fix commit's
+  date. After any extension change, run `pnpm build` in `extension/` and
+  reload the extension in `brave://extensions` before retesting.
