@@ -47,4 +47,38 @@ enum SharedStore {
         get { Set(defaults?.array(forKey: collapsedShareWindowsKey) as? [Int] ?? []) }
         set { defaults?.set(Array(newValue).sorted(), forKey: collapsedShareWindowsKey) }
     }
+
+    private static let destinationUsageKey = "destinationUsage"
+    private static let destinationUsageLimit = 50
+
+    struct DestinationUsage: Codable, Equatable {
+        var count: Int
+        var lastUsed: Date
+    }
+
+    /// Save history per group title (lowercased; window ids don't survive
+    /// browser restarts) that ranks the share sheet's common and recent
+    /// groups. Local to this device and capped to the most recent titles.
+    static var destinationUsage: [String: DestinationUsage] {
+        get {
+            guard let data = defaults?.data(forKey: destinationUsageKey) else { return [:] }
+            return (try? JSONDecoder().decode([String: DestinationUsage].self, from: data)) ?? [:]
+        }
+        set { defaults?.set(try? JSONEncoder().encode(newValue), forKey: destinationUsageKey) }
+    }
+
+    /// Ungrouped saves carry no title and are not tracked.
+    static func recordDestinationUse(title: String?, at date: Date = Date()) {
+        let key = title?.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase ?? ""
+        guard !key.isEmpty else { return }
+        var usage = destinationUsage
+        usage[key, default: DestinationUsage(count: 0, lastUsed: date)].count += 1
+        usage[key]?.lastUsed = date
+        if usage.count > destinationUsageLimit {
+            let kept = usage.sorted { $0.value.lastUsed > $1.value.lastUsed }
+                .prefix(destinationUsageLimit)
+            usage = Dictionary(uniqueKeysWithValues: kept.map { ($0.key, $0.value) })
+        }
+        destinationUsage = usage
+    }
 }

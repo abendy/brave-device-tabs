@@ -4,6 +4,9 @@ struct ShareComposeView: View {
     @ObservedObject var model: ShareComposeModel
     @FocusState private var isGroupNameFocused: Bool
     @State private var collapsedWindowIDs: Set<Int> = SharedStore.collapsedShareWindowIDs
+    /// Windows whose "More…" is expanded to list every group; resets each
+    /// time the sheet opens so it always starts compact.
+    @State private var allGroupsWindowIDs: Set<Int> = []
 
     var body: some View {
         NavigationStack {
@@ -90,13 +93,24 @@ struct ShareComposeView: View {
                     ) { index, cluster in
                         Section {
                             DisclosureGroup(isExpanded: isExpandedBinding(for: cluster.windowID)) {
-                                ForEach(cluster.groups, id: \.self) { group in
+                                let showsAllGroups = allGroupsWindowIDs.contains(cluster.windowID)
+                                ForEach(
+                                    showsAllGroups ? cluster.groups : cluster.featuredGroups,
+                                    id: \.self
+                                ) { group in
                                     destinationRow(
                                         title: group.title,
                                         destination: .existing(
                                             title: group.title, windowID: cluster.windowID
                                         ),
                                         colorName: group.color
+                                    )
+                                }
+                                if cluster.featuredGroups.count < cluster.groups.count {
+                                    moreGroupsRow(
+                                        windowID: cluster.windowID,
+                                        hiddenCount: cluster.groups.count - cluster.featuredGroups.count,
+                                        isShowingAll: showsAllGroups
                                     )
                                 }
                                 destinationRow(
@@ -208,6 +222,30 @@ struct ShareComposeView: View {
                 SharedStore.collapsedShareWindowIDs = collapsedWindowIDs
             }
         )
+    }
+
+    private func moreGroupsRow(windowID: Int, hiddenCount: Int, isShowingAll: Bool) -> some View {
+        Button {
+            withAnimation {
+                if isShowingAll {
+                    allGroupsWindowIDs.remove(windowID)
+                } else {
+                    allGroupsWindowIDs.insert(windowID)
+                }
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Text(isShowingAll ? "Show fewer" : "More… (\(hiddenCount))")
+                    .foregroundStyle(Color.accentColor)
+                Spacer()
+                Image(systemName: isShowingAll ? "chevron.up" : "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func destinationRow(

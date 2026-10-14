@@ -42,6 +42,7 @@ struct SaveLinkIntent: AppIntent {
             destination: trimmedGroup,
             destinationWindowID: nil
         )
+        SharedStore.recordDestinationUse(title: trimmedGroup)
         let destination = (trimmedGroup?.isEmpty == false) ? "“\(trimmedGroup ?? "")”" : "No group"
         return .result(dialog: "Saved to \(destination)")
     }
