@@ -78,6 +78,9 @@ pick a destination tab group (synced from the popup's own current
 `chrome.tabGroups` state) so the link opens straight into the right window and
 group instead of as a plain tab — with "no group" always available as a
 fallback.
+Each window lists only its most common and recently used groups at first
+(learned from your saves on this device); **More…** expands the rest, so
+several windows fit on screen without scrolling.
 
 Groups you rely on can be pinned (long-press a group on the app's Links
 screen, or flip "Pin this group" when creating one from the share sheet).

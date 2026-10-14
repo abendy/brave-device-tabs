@@ -30,7 +30,13 @@ final class ShareComposeModel: ObservableObject {
     struct WindowGroupCluster: Hashable {
         let windowID: Int
         let groups: [GroupOption]
+        /// The common and recent subset shown until "More…" expands the
+        /// window; equal to `groups` when the window has few enough.
+        let featuredGroups: [GroupOption]
     }
+
+    /// Groups a collapsed window lists before "More…".
+    static let featuredGroupLimit = 3
 
     @Published var sharedURL: URL?
     /// iOS-created destinations with no live browser tab group yet — the
@@ -129,6 +135,7 @@ final class ShareComposeModel: ObservableObject {
                 } else {
                     pinned = false
                 }
+                SharedStore.recordDestinationUse(title: destination.title)
                 await MainActor.run {
                     self.isPosting = false
                     let label = self.destinationLabel(
@@ -238,7 +245,9 @@ final class ShareComposeModel: ObservableObject {
                 )
             }
             let sections = Self.destinationSections(
-                live: await liveGroupsTask, known: pinned + (await knownDestinationsTask)
+                live: await liveGroupsTask,
+                known: pinned + (await knownDestinationsTask),
+                usage: SharedStore.destinationUsage
             )
             await MainActor.run {
                 self.pendingGroups = sections.pending
@@ -255,7 +264,9 @@ final class ShareComposeModel: ObservableObject {
     /// A title duplicated across windows renders in each window's cluster —
     /// the row destinations carry the window, so the rows stay distinct.
     private static func destinationSections(
-        live: [BrowserGroup], known: [PocketBaseClient.KnownDestination]
+        live: [BrowserGroup],
+        known: [PocketBaseClient.KnownDestination],
+        usage: [String: SharedStore.DestinationUsage]
     ) -> (pending: [DestinationOption], byWindow: [WindowGroupCluster]) {
         var liveTitles = Set<String>()
         var seenPerWindow = Set<String>()
@@ -307,22 +318,55 @@ final class ShareComposeModel: ObservableObject {
         pending.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
 
         let byWindow = groupsByWindow.keys.sorted().map { windowID in
-            WindowGroupCluster(
+            let groups = (groupsByWindow[windowID] ?? [])
+                .sorted {
+                    $0.sortIndex == $1.sortIndex
+                        ? $0.option.title.localizedStandardCompare($1.option.title) == .orderedAscending
+                        : $0.sortIndex < $1.sortIndex
+                }
+                .map(\.option)
+                + (pendingByWindow[windowID] ?? []).sorted {
+                    $0.title.localizedStandardCompare($1.title) == .orderedAscending
+                }
+            return WindowGroupCluster(
                 windowID: windowID,
-                groups: (groupsByWindow[windowID] ?? [])
-                    .sorted {
-                        $0.sortIndex == $1.sortIndex
-                            ? $0.option.title.localizedStandardCompare($1.option.title) == .orderedAscending
-                            : $0.sortIndex < $1.sortIndex
-                    }
-                    .map(\.option)
-                    + (pendingByWindow[windowID] ?? []).sorted {
-                        $0.title.localizedStandardCompare($1.title) == .orderedAscending
-                    }
+                groups: groups,
+                featuredGroups: featuredGroups(groups, usage: usage)
             )
         }
 
         return (pending, byWindow)
+    }
+
+    /// Picks a window's common and recent groups: the most recently used
+    /// one, then the most used, with window order filling any slots the
+    /// history can't. Kept in window order so expanding "More…" only
+    /// inserts rows around them. A window that would hide just one group
+    /// shows them all instead.
+    static func featuredGroups(
+        _ groups: [GroupOption], usage: [String: SharedStore.DestinationUsage]
+    ) -> [GroupOption] {
+        guard groups.count > featuredGroupLimit + 1 else { return groups }
+
+        let used = groups.compactMap { group in
+            usage[group.title.localizedLowercase].map { (group: group, usage: $0) }
+        }
+        var picked: [GroupOption] = []
+        if let mostRecent = used.max(by: { $0.usage.lastUsed < $1.usage.lastUsed }) {
+            picked.append(mostRecent.group)
+        }
+        let mostUsed = used.sorted {
+            $0.usage.count == $1.usage.count
+                ? $0.usage.lastUsed > $1.usage.lastUsed
+                : $0.usage.count > $1.usage.count
+        }
+        let candidates: [GroupOption] = mostUsed.map { $0.group } + groups
+        for candidate in candidates where picked.count < featuredGroupLimit {
+            if !picked.contains(candidate) {
+                picked.append(candidate)
+            }
+        }
+        return groups.filter { picked.contains($0) }
     }
 
     private func resolvedDestination() -> (title: String?, windowID: Int?) {
